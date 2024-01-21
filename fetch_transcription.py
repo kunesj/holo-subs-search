@@ -24,7 +24,7 @@ params = {
     ],
     # save to specific file
     "paths": {
-        "subtitle": "./DOWNLOADED"
+        "subtitle": DOWNLOAD_PATH
     },
     "outtmpl": {
         "subtitle": "%(id)s.%(ext)s"  # .en.srt suffix is added automatically
