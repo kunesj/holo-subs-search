@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import datetime
 import json
 import logging
 import os
@@ -168,7 +169,7 @@ class _YoutubeRecord(_Record, abc.ABC):
         if value is None:
             _logger.info("Removing Youtube info for %r ID=%s", self.model_name, self.id)
         else:
-            _logger.info("Setting Youtube info for %r ID=%s", self.model_name, self.id)
+            _logger.info("Saving Youtube info for %r ID=%s", self.model_name, self.id)
         self.save_json_file(YOUTUBE_JSON, value)
 
     @property
@@ -186,7 +187,7 @@ class _HolodexRecord(_YoutubeRecord, abc.ABC):
         if value is None:
             _logger.info("Removing Holodex info for %r ID=%s", self.model_name, self.id)
         else:
-            _logger.info("Setting Holodex info for %r ID=%s", self.model_name, self.id)
+            _logger.info("Saving Holodex info for %r ID=%s", self.model_name, self.id)
         self.save_json_file(HOLODEX_JSON, value)
 
     @property
@@ -242,14 +243,18 @@ class ChannelRecord(_HolodexRecord):
         storage: Storage,
         value: HolodexLiteChannel | HolodexChannel,
         default_metadata: dict[str, Any] | None = None,
+        update_holodex_info: bool = True,
     ) -> Self:
         holodex_info = json.loads(json.dumps(value._response))
-
         record = cls.from_holodex_id(storage=storage, id=value.id)
+
         if not record.exists():
             record.create(**(default_metadata or {}))
+            record.holodex_info = holodex_info
 
-        record.holodex_info = holodex_info
+        elif update_holodex_info:
+            record.holodex_info = holodex_info
+
         return record
 
     # Videos
@@ -267,7 +272,40 @@ class VideoRecord(_HolodexRecord):
     def channel_id(self) -> str:
         return self.metadata["channel_id"]
 
-    def create(self, channel_id: str, **kwargs) -> None:
+    @property
+    def fetch_subtitles(self) -> bool:
+        """False if this video should be skipped when fetching subtitles"""
+        return self.metadata.get("fetch_subtitles", True)
+
+    @fetch_subtitles.setter
+    def fetch_subtitles(self, value: bool) -> None:
+        metadata = dict(self.metadata, fetch_subtitles=value)
+        self.save_json_file(METADATA_JSON, metadata)
+
+    @property
+    def published_at(self) -> datetime.datetime | None:
+        if self.holodex_info:
+            return datetime.datetime.fromisoformat(self.holodex_info["published_at"])
+        return None
+
+    @property
+    def members_only(self) -> bool:
+        if self.holodex_info and (topic_id := self.holodex_info.get("topic_id")):
+            return topic_id == "members_only"
+        elif "members_only" in self.metadata:
+            return self.metadata["members_only"]
+        return False
+
+    @members_only.setter
+    def members_only(self, value: bool) -> None:
+        metadata = dict(self.metadata, members_only=value)
+        self.save_json_file(METADATA_JSON, metadata)
+
+    @property
+    def subtitles_path(self) -> pathlib.Path:
+        return self.record_path / "subtitles/"
+
+    def create(self, channel_id: str, fetch_subtitles: bool = True, **kwargs) -> None:
         return super().create(channel_id=channel_id, **kwargs)
 
     @classmethod
@@ -277,19 +315,50 @@ class VideoRecord(_HolodexRecord):
         storage: Storage,
         value: HolodexChannelVideoInfo,
         default_metadata: dict[str, Any] | None = None,
+        update_holodex_info: bool = True,
     ) -> Self:
         holodex_info = json.loads(json.dumps(value._response))
-
         record = cls.from_holodex_id(storage=storage, id=value.id)
-        if not record.exists():
-            channel = ChannelRecord.from_holodex_id(storage=storage, id=value.channel.id)
-            if not channel.exists():
-                channel = ChannelRecord.from_holodex(
-                    storage=storage, value=value.channel, default_metadata={"refresh_videos": False}
-                )
 
+        if not record.exists():
+            channel = ChannelRecord.from_holodex(
+                storage=storage,
+                value=value.channel,
+                default_metadata={"refresh_videos": False},
+                update_holodex_info=False,
+            )
             default_metadata = (default_metadata or {}) | {"channel_id": channel.id}
             record.create(**default_metadata)
+            record.holodex_info = holodex_info
 
-        record.holodex_info = holodex_info
+        elif update_holodex_info:
+            record.holodex_info = holodex_info
+
         return record
+
+    # Subtitles
+
+    def list_subtitles(self) -> Iterator[str]:
+        if not self.subtitles_path.exists():
+            return
+
+        with os.scandir(self.subtitles_path) as it:
+            for entry in it:
+                if entry.is_file():
+                    yield entry.name
+
+    def save_subtitles(self, name: str, content: str | None) -> None:
+        if name.count(".") != 2:
+            raise ValueError("Name of subtitle format must be in `TYPE.LANG.EXT` format", name)
+
+        file_path = self.subtitles_path / name
+        if content is None:
+            if file_path.exists():
+                file_path.unlink()
+        else:
+            self.subtitles_path.mkdir(exist_ok=True)
+            file_path.write_text(content)
+
+    def load_subtitles(self, name: str) -> str | None:
+        file_path = self.subtitles_path / name
+        return file_path.read_text() if file_path.exists() else None
