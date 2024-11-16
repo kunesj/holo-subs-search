@@ -2,13 +2,15 @@
 
 import argparse
 import datetime
+import json
 import logging
 import os
 import pathlib
+import time
 
 import yt_dlp
 
-from . import holodex_downloader, ydl_downloader
+from . import holodex_downloader, sub_parser, ydl_downloader
 from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
                 pass  # not needed with holodex.json
             elif name.endswith(".srt"):
                 with open(file_path, "r") as f:
-                    video.save_subtitles(f"youtube.{name}", f.read())  # youtube.en.srt
+                    video.save_subtitle(f"youtube.{name}", f.read())  # youtube.en.srt
             else:
                 _logger.warning("Fetched unexpected file: %s", name)
 
@@ -54,6 +56,24 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
         if not has_subtitles and is_old:
             _logger.info("No subtitles fetched for older video %s, will be skipped next time", video.id)
             video.fetch_subtitles = False
+
+
+def _process_video_subtitles(storage: Storage) -> None:
+    for video in storage.list_videos():
+        for name in video.list_subtitles(filter_ext=["srt"]):
+            source, lang, ext = name.split(".")
+
+            if bool(list(video.list_subtitles(filter_source=["processed"], filter_lang=[lang], filter_ext=["json"]))):
+                continue
+
+            content = video.load_subtitle(name)
+            data = {
+                "timestamp": time.time(),
+                "source": source,
+                "lang": lang,
+                "lines": [x.to_json() for x in sub_parser.parse_srt_file(content)],
+            }
+            video.save_subtitle(f"processed.{lang}.json", json.dumps(data))
 
 
 # flake8: noqa: C801
@@ -165,15 +185,19 @@ def main() -> None:
         langs = [x_s for x in args.fetch_subtitles_langs.split(",") if (x_s := x.strip())]
         youtube_members = [x_s for x in args.youtube_members.split(",") if (x_s := x.strip())]
 
-        fetch_videos = []
-
         for video in storage.list_videos():
-            if video.youtube_id and video.fetch_subtitles and not list(video.list_subtitles()):
+            if video.youtube_id and video.fetch_subtitles and not list(video.list_subtitles(filter_source=["youtube"])):
                 if video.members_only:
                     channel = storage.get_channel(video.channel_id)
                     if not channel.exists() or channel.youtube_id not in youtube_members:
                         continue
                 _fetch_video_subtitles(video, langs, cookies_from_browser=args.youtube_cookies_from_browser)
+
+    # processing subtitles into usable format
+
+    if args.process_subtitles:
+        _logger.info("Processing subtitles...")
+        _process_video_subtitles(storage)
 
 
 if __name__ == "__main__":

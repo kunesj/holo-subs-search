@@ -338,18 +338,36 @@ class VideoRecord(_HolodexRecord):
 
     # Subtitles
 
-    def list_subtitles(self) -> Iterator[str]:
+    def list_subtitles(
+        self,
+        filter_source: list[str] | None = None,
+        filter_lang: list[str] | None = None,
+        filter_ext: list[str] | None = None,
+    ) -> Iterator[str]:
         if not self.subtitles_path.exists():
             return
 
         with os.scandir(self.subtitles_path) as it:
             for entry in it:
                 if entry.is_file():
+                    if entry.name.count(".") != 2:
+                        _logger.error("Subtitles with invalid name skipped: %s", entry.name)
+                        continue
+
+                    source, lang, ext = entry.name.split(".")
+
+                    if filter_source is not None and source not in filter_source:
+                        continue
+                    elif filter_lang is not None and lang not in filter_lang:
+                        continue
+                    elif filter_ext is not None and ext not in filter_ext:
+                        continue
+
                     yield entry.name
 
-    def save_subtitles(self, name: str, content: str | None) -> None:
+    def save_subtitle(self, name: str, content: str | None) -> None:
         if name.count(".") != 2:
-            raise ValueError("Name of subtitle format must be in `TYPE.LANG.EXT` format", name)
+            raise ValueError("Name of subtitle format must be in `SOURCE-OR-TYPE.LANG.EXT` format", name)
 
         file_path = self.subtitles_path / name
         if content is None:
@@ -359,6 +377,6 @@ class VideoRecord(_HolodexRecord):
             self.subtitles_path.mkdir(exist_ok=True)
             file_path.write_text(content)
 
-    def load_subtitles(self, name: str) -> str | None:
+    def load_subtitle(self, name: str) -> str | None:
         file_path = self.subtitles_path / name
         return file_path.read_text() if file_path.exists() else None

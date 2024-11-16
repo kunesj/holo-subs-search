@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import pathlib
 from typing import Iterator
 
 import srt
@@ -13,22 +14,28 @@ class SubLine:
     end: datetime.timedelta
     content: str
 
-    def to_json(self) -> dict:
-        return {"start": self.start.total_seconds(), "end": self.end.total_seconds(), "content": self.content}
+    def to_json(self) -> list[float, float, str]:  # [start, end, content]
+        """
+        Returns as `[start, end, content]`.
+        Not a dict to lower the amount of redundant data when dumping a lot of lines to JSON.
+        """
+        return [self.start.total_seconds(), self.end.total_seconds(), self.content]
 
 
-def parse_srt_file(file_path: str) -> Iterator[SubLine]:
+def parse_srt_file(source: str | pathlib.Path) -> Iterator[SubLine]:
     """
     Parses automatic YouTube subtitles.
     - merges/splits duplicated lines
     - removes some unneeded special characters
     - generated lines might be overlapping
     """
-    with open(file_path, "r") as f:
-        srt_data = f.read()
+    if isinstance(source, pathlib.Path):
+        source = source.read_text()
+    elif not isinstance(source, str):
+        raise TypeError(source)
 
     unfinished = []
-    for sub in srt.parse(srt_data):
+    for sub in srt.parse(source):
         # split content into separate lines
 
         raw_lines = []
