@@ -14,10 +14,12 @@ from . import holodex_downloader, sub_parser, ydl_downloader
 from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
+RATE_LIMIT_COUNT = 0
 
 
 def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_browser: str | None = None) -> None:
     _logger.info("Fetching Youtube subtitles for video %s", video.id)
+    global RATE_LIMIT_COUNT  # nasty, but I don't want to waste time on anything more complex
 
     # fetch info.json and subtitles
 
@@ -39,10 +41,19 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
             video.members_only = True
         elif "Private video" in e.msg or "This video is private" in e.msg:
             _logger.error("Private video, subtitle fetch will be disabled: %s", e)
-            video.fetch_subtitles = True
+            video.fetch_subtitles = False
         elif "Video unavailable" in e.msg:
             _logger.error("Unavailable video, subtitle fetch will be disabled: %s", e)
-            video.fetch_subtitles = True
+            video.fetch_subtitles = False
+        elif "HTTP Error 429" in e.msg:
+            RATE_LIMIT_COUNT += 1
+            sleep_time = 2**RATE_LIMIT_COUNT
+            _logger.error(
+                "Rate limited. Will sleep for %s seconds. " "Re-run again later to fetch skipped subtitles: %s",
+                sleep_time,
+                e,
+            )
+            time.sleep(sleep_time)
         else:
             raise
 
@@ -63,17 +74,17 @@ def _process_video_subtitles(storage: Storage) -> None:
         for name in video.list_subtitles(filter_ext=["srt"]):
             source, lang, ext = name.split(".")
 
-            if bool(list(video.list_subtitles(filter_source=["processed"], filter_lang=[lang], filter_ext=["json"]))):
+            if bool(list(video.list_subtitles(filter_source=["parsed"], filter_lang=[lang], filter_ext=["json"]))):
                 continue
 
             content = video.load_subtitle(name)
-            data = {
-                "timestamp": time.time(),
-                "source": source,
-                "lang": lang,
-                "lines": [x.to_json() for x in sub_parser.parse_srt_file(content)],
-            }
-            video.save_subtitle(f"processed.{lang}.json", json.dumps(data))
+            parsed = sub_parser.SubFile(
+                timestamp=time.time(),
+                source=source,
+                lang=lang,
+                lines=[x for x in sub_parser.parse_srt_file(content)],
+            )
+            video.save_subtitle(f"parsed.{lang}.json", json.dumps(parsed.to_json()))
 
 
 # flake8: noqa: C801

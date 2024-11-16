@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import Iterator
+from typing import Any, Iterator, Self
 
 import srt
 
@@ -14,12 +14,45 @@ class SubLine:
     end: datetime.timedelta
     content: str
 
-    def to_json(self) -> list[float, float, str]:  # [start, end, content]
+    @classmethod
+    def from_json(cls: type[Self], value: list) -> Self:
+        return cls(
+            start=datetime.timedelta(seconds=value[0]),
+            end=datetime.timedelta(seconds=value[1]),
+            content=value[2],
+        )
+
+    def to_json(self) -> list:  # [start, end, content]
         """
         Returns as `[start, end, content]`.
         Not a dict to lower the amount of redundant data when dumping a lot of lines to JSON.
         """
         return [self.start.total_seconds(), self.end.total_seconds(), self.content]
+
+
+@dataclasses.dataclass
+class SubFile:
+    timestamp: float
+    source: str
+    lang: str
+    lines: list[SubLine]
+
+    @classmethod
+    def from_json(cls: type[Self], value: dict[str, Any]) -> Self:
+        return cls(
+            timestamp=value["timestamp"],
+            source=value["source"],
+            lang=value["lang"],
+            lines=[SubLine.from_json(x) for x in value["lines"]],
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "source": self.source,
+            "lang": self.lang,
+            "lines": [line.to_json() for line in self.lines],
+        }
 
 
 def parse_srt_file(source: str | pathlib.Path) -> Iterator[SubLine]:
