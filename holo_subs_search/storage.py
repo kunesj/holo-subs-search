@@ -115,6 +115,8 @@ class _Record(abc.ABC):
         key = ("text", name)
 
         if key not in self._cache or not from_cache:
+            self._cache.pop(key, None)
+
             path = self.record_path / name
             if path.exists() and path.is_file():
                 self._cache[key] = path.read_text()
@@ -125,9 +127,11 @@ class _Record(abc.ABC):
         key = ("json", name)
 
         if key not in self._cache or not from_cache:
-            value = self.load_text_file(name, from_cache=False)
-            if value is not None:
-                self._cache[key] = json.loads(value)
+            self._cache.pop(key, None)
+
+            value_text = self.load_text_file(name, from_cache=False)
+            if value_text is not None:
+                self._cache[key] = json.loads(value_text)
 
         return self._cache.get(key)
 
@@ -153,9 +157,14 @@ class _Record(abc.ABC):
         key = ("json", name)
         self._cache.pop(key, None)
 
-        if isinstance(value, dict):
-            value = json.dumps(value)
-        self.save_text_file(name, value)
+        if value is None:
+            value_text = value
+        elif isinstance(value, (dict, list)):
+            value_text = json.dumps(value)
+        else:
+            raise TypeError(value)
+
+        self.save_text_file(name, value_text)
 
         if value is not None:
             self._cache[key] = value
@@ -311,13 +320,13 @@ class VideoRecord(_HolodexRecord):
         return self.metadata["channel_id"]
 
     @property
-    def fetch_subtitles(self) -> bool:
-        """False if this video should be skipped when fetching subtitles"""
-        return self.metadata.get("fetch_subtitles", True)
+    def skip_subtitles(self) -> list[str]:
+        """Lists langs for which the subtitle fetch should be skipped. Use "all" to skip all."""
+        return self.metadata.get("skip_subtitles", [])
 
-    @fetch_subtitles.setter
-    def fetch_subtitles(self, value: bool) -> None:
-        metadata = dict(self.metadata, fetch_subtitles=value)
+    @skip_subtitles.setter
+    def skip_subtitles(self, value: list[str]) -> None:
+        metadata = dict(self.metadata, skip_subtitles=value)
         self.save_json_file(METADATA_JSON, metadata)
 
     @property
@@ -365,8 +374,8 @@ class VideoRecord(_HolodexRecord):
 
     # Methods
 
-    def create(self, channel_id: str, fetch_subtitles: bool = True, **kwargs) -> None:
-        return super().create(channel_id=channel_id, **kwargs)
+    def create(self, channel_id: str, skip_subtitles: list[str] | None = None, **kwargs) -> None:
+        return super().create(channel_id=channel_id, skip_subtitles=skip_subtitles or [], **kwargs)
 
     @classmethod
     def from_holodex(
@@ -405,6 +414,12 @@ class VideoRecord(_HolodexRecord):
         filter_ext: list[str] | None = None,
     ) -> Iterator[str]:
         if not self.subtitles_path.exists():
+            return
+        elif filter_source is not None and not filter_source:
+            return
+        elif filter_lang is not None and not filter_lang:
+            return
+        elif filter_ext is not None and not filter_ext:
             return
 
         with os.scandir(self.subtitles_path) as it:

@@ -18,7 +18,7 @@ DEFAULT_STORAGE_PATH = (pathlib.Path(os.path.dirname(__file__)) / "../data/").ab
 
 
 def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_browser: str | None = None) -> None:
-    _logger.info("Fetching Youtube subtitles for video %s", video.id)
+    _logger.info("Fetching Youtube subtitles for video %s - %s", video.id, video.published_at)
 
     # fetch info.json and subtitles
 
@@ -44,25 +44,37 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
             video.members_only = True
         elif any(x in e.msg for x in ("Private video", "This video is private")):
             _logger.error("Private video, subtitle fetch will be disabled: %s", e)
-            video.fetch_subtitles = False
+            video.skip_subtitles += ["all"]
         elif "Video unavailable" in e.msg:
             _logger.error("Unavailable video, subtitle fetch will be disabled: %s", e)
-            video.fetch_subtitles = False
+            video.skip_subtitles += ["all"]
         elif "Sign in to confirm your age" in e.msg:
             _logger.error("Age confirmation required. Run again with cookies: %s", e)
         else:
             raise
 
     else:
-        # disable subtitle fetch for videos without any that were published 1+week ago
+        _skip_missing_subtitles(video, langs)
 
-        week_ago = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=7)
-        has_subtitles = bool(list(video.list_subtitles()))
-        is_old = video.published_at is None or video.published_at <= week_ago
 
-        if not has_subtitles and is_old:
-            _logger.info("No subtitles fetched for older video %s, will be skipped next time", video.id)
-            video.fetch_subtitles = False
+def _skip_missing_subtitles(video: VideoRecord, langs: list[str], days: int = 7) -> None:
+    """
+    disable subtitle fetch for videos that were published 1+week ago and are missign the subtitles
+    """
+    week_ago = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=days)
+    is_old = video.published_at is None or video.published_at <= week_ago
+
+    if is_old:
+        stored_langs = {name.split(".")[1] for name in video.list_subtitles()}
+        missing_langs = {lang for lang in langs if lang not in stored_langs}
+
+        if missing_langs:
+            _logger.info(
+                "No subtitles for %s languages fetched for older video ID=%s, will be skipped next time",
+                missing_langs,
+                video.id,
+            )
+            video.skip_subtitles += list(missing_langs)
 
 
 def _search_video_subtitles(
@@ -242,14 +254,25 @@ def main() -> None:
         _logger.info("Fetching subtitles...")
 
         for video in storage.list_videos():
-            if video.youtube_id and video.fetch_subtitles and not list(video.list_subtitles(filter_source=["youtube"])):
-                if video.members_only:
-                    channel = storage.get_channel(video.channel_id)
-                    if not channel.exists() or channel.youtube_id not in args.yt_members:
-                        continue
-                _fetch_video_subtitles(
-                    video, args.fetch_subtitles_langs, cookies_from_browser=args.yt_cookies_from_browser
-                )
+            if not video.youtube_id:
+                continue  # not a youtube video?
+            elif "all" in video.skip_subtitles:
+                continue  # skip all languages
+
+            fetch_langs = set(args.fetch_subtitles_langs) - set(video.skip_subtitles)
+            for name in video.list_subtitles(filter_source=["youtube"], filter_lang=list(fetch_langs)):
+                source, lang, ext = name.split(".")
+                fetch_langs -= {lang}
+
+            if not fetch_langs:
+                continue  # no langs to fetch
+
+            if video.members_only:
+                channel = storage.get_channel(video.channel_id)
+                if not channel.exists() or channel.youtube_id not in args.yt_members:
+                    continue  # not accessible membership video
+
+            _fetch_video_subtitles(video, list(fetch_langs), cookies_from_browser=args.yt_cookies_from_browser)
 
         for video in storage.list_videos():
             video.update_gitignore()
