@@ -314,10 +314,10 @@ class VideoRecord(_HolodexRecord):
 
     @property
     def members_only(self) -> bool:
-        if self.holodex_info and (topic_id := self.holodex_info.get("topic_id")):
-            return topic_id == "members_only"
-        elif "members_only" in self.metadata:
+        if "members_only" in self.metadata:
             return self.metadata["members_only"]
+        elif self.holodex_info and (topic_id := self.holodex_info.get("topic_id")):
+            return topic_id == "membersonly"
         return False
 
     @members_only.setter
