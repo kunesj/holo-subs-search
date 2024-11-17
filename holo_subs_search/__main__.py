@@ -14,6 +14,7 @@ from . import holodex_downloader, sub_parser, sub_search, ydl_downloader
 from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
+DEFAULT_STORAGE_PATH = (pathlib.Path(os.path.dirname(__file__)) / "../data/").absolute()
 RATE_LIMIT_COUNT = 0
 
 
@@ -124,6 +125,10 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--storage",
+        default=DEFAULT_STORAGE_PATH,
+    )
+    parser.add_argument(
         "--fetch-org-channels",
         default=None,  # "All Vtubers", "Hololive", "Nijisanji", "Independents"
     )
@@ -186,8 +191,9 @@ def main() -> None:
 
     # storage
 
-    data_path = (pathlib.Path(os.path.dirname(__file__)) / "../data/").absolute()
-    storage = Storage(path=data_path)
+    storage_path = pathlib.Path(args.storage)
+    _logger.info("Storage: %s", storage_path)
+    storage = Storage(path=storage_path)
 
     # fetch/refresh channels
 
