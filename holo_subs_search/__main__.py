@@ -150,8 +150,8 @@ def main() -> None:
         "--fetch-subtitles-langs",
         nargs="+",
         type=str,
-        default=["en", "jp", "id"],
-        help="`--search-langs en jp id`",
+        default=["en"],
+        help="`--fetch-subtitles-langs en jp id`",
     )
     parser.add_argument(
         "--yt-members",
@@ -182,7 +182,7 @@ def main() -> None:
         "--search-langs",
         nargs="+",
         type=str,
-        default=["en", "jp", "id"],
+        default=["en"],
         help="`--search-langs en jp id`",
     )
     parser.add_argument(
