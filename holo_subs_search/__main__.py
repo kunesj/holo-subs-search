@@ -15,12 +15,10 @@ from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
 DEFAULT_STORAGE_PATH = (pathlib.Path(os.path.dirname(__file__)) / "../data/").absolute()
-RATE_LIMIT_COUNT = 0
 
 
 def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_browser: str | None = None) -> None:
     _logger.info("Fetching Youtube subtitles for video %s", video.id)
-    global RATE_LIMIT_COUNT  # nasty, but I don't want to waste time on anything more complex
 
     # fetch info.json and subtitles
 
@@ -29,7 +27,6 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
             video_ids=[video.youtube_id],
             langs=langs,
             cookies_from_browser=cookies_from_browser,
-            rate_limit_count=RATE_LIMIT_COUNT,
         ):
             if name == "info.json":
                 pass  # not needed with holodex.json
@@ -53,15 +50,6 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
             video.fetch_subtitles = False
         elif "Sign in to confirm your age" in e.msg:
             _logger.error("Age confirmation required. Run again with cookies: %s", e)
-        elif "HTTP Error 429" in e.msg:
-            RATE_LIMIT_COUNT += 1
-            sleep_time = 2**RATE_LIMIT_COUNT
-            _logger.error(
-                "Rate limited. Will sleep for %s seconds. " "Re-run again later to fetch skipped subtitles: %s",
-                sleep_time,
-                e,
-            )
-            time.sleep(sleep_time)
         else:
             raise
 

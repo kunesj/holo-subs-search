@@ -1,10 +1,14 @@
 #!/usr/bin/env python3.11
 
+import logging
 import os
 import tempfile
+import time
 from typing import Any, Iterator, Sequence
 
-from yt_dlp import YoutubeDL
+import yt_dlp
+
+_logger = logging.getLogger(__name__)
 
 
 def get_video_params(
@@ -36,7 +40,8 @@ def get_video_params(
         },
     }
 
-    if cookies_from_browser:
+    # Anonymous requests don't get HTTP 429 errors as easily, so we don't have to wait with them by default
+    if cookies_from_browser or rate_limit_count > 0:
         params |= {
             # try to prevent HTTP 429
             # "sleep_interval_requests": None,
@@ -50,22 +55,39 @@ def get_video_params(
 
 
 def download_video_info_and_subtitles(
-    video_ids: Sequence[str], langs: list[str], cookies_from_browser: str | None = None, rate_limit_count: int = 0
+    video_ids: Sequence[str], langs: list[str], cookies_from_browser: str | None = None
 ) -> Iterator[tuple[str, str, str]]:
     with tempfile.TemporaryDirectory() as tmpdir:
         # download all new files
 
-        with YoutubeDL(
-            params=get_video_params(
-                download_path=tmpdir,
-                langs=langs,
-                cookies_from_browser=cookies_from_browser,
-                rate_limit_count=rate_limit_count,
-            )
-        ) as ydl:
-            error_code = ydl.download([f"https://www.youtube.com/watch?v={id_}" for id_ in video_ids])
-            if error_code != 0:
-                raise Exception("yt-dlp download failed!")
+        rate_limit_count = 0
+        max_rate_limit_count = 5
+        while True:
+            try:
+                with yt_dlp.YoutubeDL(
+                    params=get_video_params(
+                        download_path=tmpdir,
+                        langs=langs,
+                        cookies_from_browser=cookies_from_browser,
+                        rate_limit_count=rate_limit_count,
+                    )
+                ) as ydl:
+                    error_code = ydl.download([f"https://www.youtube.com/watch?v={id_}" for id_ in video_ids])
+                    if error_code != 0:
+                        raise Exception("yt-dlp download failed!")
+
+            except yt_dlp.utils.DownloadError as e:
+                if "HTTP Error 429" in e.msg and rate_limit_count < max_rate_limit_count:
+                    rate_limit_count += 1
+                    sleep_time = 2**rate_limit_count
+                    _logger.error("Rate limited. Will retry after %s seconds: %s", sleep_time, e)
+                    time.sleep(sleep_time)
+                    continue
+                raise
+
+            break
+
+        # iterate over downloaded files
 
         with os.scandir(tmpdir) as it:
             for entry in it:
