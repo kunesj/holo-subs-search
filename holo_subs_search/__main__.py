@@ -2,12 +2,12 @@
 
 import argparse
 import datetime
-import json
 import logging
 import os
 import pathlib
 import time
 
+import termcolor
 import yt_dlp
 
 from . import holodex_downloader, sub_parser, sub_search, ydl_downloader
@@ -84,8 +84,8 @@ def _search_video_subtitles(
     regex: bool = False,
     filter_source: list[str] | None = None,
     filter_lang: list[str] | None = None,
-    # lines_before: int = 3,
-    # lines_after: int = 3,
+    lines_before: int = 3,  # FIXME: time before/after
+    lines_after: int = 3,
 ) -> None:  # FIXME: unfinished
     for video in storage.list_videos():
         for name in video.list_subtitles(filter_source=filter_source, filter_lang=filter_lang, filter_ext=["srt"]):
@@ -101,19 +101,44 @@ def _search_video_subtitles(
             searchable = sub_search.SearchableSubFile.from_sub_file(parsed)
 
             header_printed = False
-            for indexes in searchable.search(value=value, regex=regex):
+            for match_idx, indexes in enumerate(searchable.search(value=value, regex=regex)):
+                # print header with general info about the video
+
                 if not header_printed:
-                    print(
-                        f">>>>>>>>>> {video.youtube_url} | members_only={video.members_only} | {parsed.lang} | {video.title}"
-                    )
+                    parts = [
+                        video.published_at.strftime("%Y-%m-%d") if video.published_at else None,
+                        video.id,
+                        parsed.lang,
+                    ]
+
+                    if video.members_only:
+                        parts.append("members-only")
+
+                    parts.append(video.title)
+                    termcolor.cprint(f">>>>>>>>>> {' | '.join(parts)}", color="green", attrs=["bold"])
                     header_printed = True
 
-                print("-----------")
-                for idx in indexes:
-                    ts_line = searchable.lines[idx]
-                    ts_url = f"{video.youtube_url}&t={int(ts_line.start.total_seconds())}"
+                # print timestamp of the match and url to open it
 
-                    print(f"{ts_url} | {ts_line.start} | {ts_line.content}")
+                ts_line = searchable.lines[indexes[0]]
+                ts_seconds = int(ts_line.start.total_seconds())
+                ts_url = f"{video.youtube_url}&t={ts_seconds}"
+                termcolor.cprint(f">>>>> {datetime.timedelta(seconds=ts_seconds)} | {ts_url}", attrs=["bold"])
+
+                # print match lines
+
+                left_index = max(indexes[0] - lines_before, 0)
+                right_index = min(indexes[-1] + lines_after, len(searchable.lines) - 1)
+                for line_idx in range(left_index, right_index + 1):
+                    ts_line = searchable.lines[line_idx]
+                    ts_seconds = int(ts_line.start.total_seconds())
+
+                    if line_idx in indexes:
+                        ts_content = termcolor.colored(ts_line.content, "magenta")
+                    else:
+                        ts_content = ts_line.content
+
+                    print(f"{datetime.timedelta(seconds=ts_seconds)} | {ts_content}")
 
 
 # flake8: noqa: C801
