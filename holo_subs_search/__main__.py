@@ -26,7 +26,10 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
 
     try:
         for yt_id, name, file_path in ydl_downloader.download_video_info_and_subtitles(
-            video_ids=[video.youtube_id], langs=langs, cookies_from_browser=cookies_from_browser
+            video_ids=[video.youtube_id],
+            langs=langs,
+            cookies_from_browser=cookies_from_browser,
+            rate_limit_count=RATE_LIMIT_COUNT,
         ):
             if name == "info.json":
                 pass  # not needed with holodex.json
