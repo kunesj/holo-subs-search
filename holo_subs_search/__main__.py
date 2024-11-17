@@ -10,7 +10,7 @@ import time
 import termcolor
 import yt_dlp
 
-from . import holodex_downloader, sub_parser, sub_search, ydl_downloader
+from . import holodex_tools, sub_parser, sub_search, ydl_tools
 from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
     # fetch info.json and subtitles
 
     try:
-        for yt_id, name, file_path in ydl_downloader.download_video_info_and_subtitles(
+        for yt_id, name, file_path in ydl_tools.download_video_info_and_subtitles(
             video_ids=[video.youtube_id],
             langs=langs,
             cookies_from_browser=cookies_from_browser,
@@ -250,13 +250,13 @@ def main() -> None:
 
     if args.fetch_org_channels:
         _logger.info("Fetching %r channels...", args.fetch_org_channels)
-        for value in holodex_downloader.download_org_channels(org=args.fetch_org_channels):
+        for value in holodex_tools.download_org_channels(org=args.fetch_org_channels):
             ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             fetch_holodex_ids -= {value.id}
 
     if fetch_holodex_ids:
         _logger.info("Refreshing stored channels...")
-        for value in holodex_downloader.download_channels(channel_ids=set(fetch_holodex_ids)):
+        for value in holodex_tools.download_channels(channel_ids=set(fetch_holodex_ids)):
             ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             fetch_holodex_ids -= {value.id}
 
@@ -271,7 +271,7 @@ def main() -> None:
         holodex_channel_ids = {
             channel.holodex_id for channel in storage.list_channels() if channel.holodex_id and channel.refresh_videos
         }
-        for value in holodex_downloader.download_channel_video_info(holodex_channel_ids):
+        for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
             if value.status in ("new", "upcoming", "live"):
                 continue
             VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
