@@ -111,7 +111,9 @@ def _search_video_subtitles(
             header_printed = False
             for indexes in searchable.search(value=value, regex=regex):
                 if not header_printed:
-                    print(f">>>>>>>>>> {video.youtube_url} | {parsed.lang} | {video.title}")
+                    print(
+                        f">>>>>>>>>> {video.youtube_url} | members_only={video.members_only} | {parsed.lang} | {video.title}"
+                    )
                     header_printed = True
 
                 print("-----------")
@@ -231,6 +233,8 @@ def main() -> None:
             channel.holodex_id for channel in storage.list_channels() if channel.holodex_id and channel.refresh_videos
         }
         for value in holodex_downloader.download_channel_video_info(holodex_channel_ids):
+            if value.status in ("new", "upcoming", "live"):
+                continue
             VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
 
     # fetching subtitles
