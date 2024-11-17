@@ -84,9 +84,9 @@ def _search_video_subtitles(
     regex: bool = False,
     filter_source: list[str] | None = None,
     filter_lang: list[str] | None = None,
-    lines_before: int = 3,  # FIXME: time before/after
-    lines_after: int = 3,
-) -> None:  # FIXME: unfinished
+    time_before: int = 15,
+    time_after: int = 15,
+) -> None:
     for video in storage.list_videos():
         for name in video.list_subtitles(filter_source=filter_source, filter_lang=filter_lang, filter_ext=["srt"]):
             source, lang, ext = name.split(".")
@@ -125,11 +125,18 @@ def _search_video_subtitles(
                 ts_url = f"{video.youtube_url}&t={ts_seconds}"
                 termcolor.cprint(f">>>>> {datetime.timedelta(seconds=ts_seconds)} | {ts_url}", attrs=["bold"])
 
+                # expand range of printed lines to add context
+
+                left_edge_index = searchable.index_to_past_index(
+                    indexes[0], delta=datetime.timedelta(seconds=time_before)
+                )
+                right_edge_index = searchable.index_to_future_index(
+                    indexes[-1], delta=datetime.timedelta(seconds=time_after)
+                )
+
                 # print match lines
 
-                left_index = max(indexes[0] - lines_before, 0)
-                right_index = min(indexes[-1] + lines_after, len(searchable.lines) - 1)
-                for line_idx in range(left_index, right_index + 1):
+                for line_idx in range(left_edge_index, right_edge_index + 1):
                     ts_line = searchable.lines[line_idx]
                     ts_seconds = int(ts_line.start.total_seconds())
 

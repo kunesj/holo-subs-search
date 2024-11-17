@@ -2,6 +2,7 @@
 
 import bisect
 import dataclasses
+import datetime
 import re
 from typing import Self
 
@@ -121,3 +122,37 @@ class SearchableSubFile:
         else:
             for indexes in self.search_exact(value, case_sensitive=case_sensitive):
                 yield indexes
+
+    def index_to_past_index(self, index: int, delta: datetime.timedelta) -> int:
+        """
+        Returns index of line that starts X amount of time before the line with provided index.
+        Useful for adding relevant lines to search results.
+        """
+        if delta.total_seconds() < 0:
+            raise ValueError(delta)
+
+        min_start = self.lines[index].start - delta
+        while index > 0:
+            if self.lines[index - 1].start >= min_start:
+                index -= 1
+            else:
+                break
+
+        return index
+
+    def index_to_future_index(self, index: int, delta: datetime.timedelta) -> int:
+        """
+        Returns index of line that starts X amount of time after the line with provided index.
+        Useful for adding relevant lines to search results.
+        """
+        if delta.total_seconds() < 0:
+            raise ValueError(delta)
+
+        max_start = self.lines[index].start + delta
+        while index < len(self.lines):
+            if self.lines[index + 1].start <= max_start:
+                index += 1
+            else:
+                break
+
+        return index
