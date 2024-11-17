@@ -82,6 +82,8 @@ class _Record(abc.ABC):
         self.storage = storage
         self.id = id
 
+    # Fields / Properties
+
     @property
     def model_path(self) -> pathlib.Path:
         return self.storage.path / self.model_name
@@ -89,6 +91,12 @@ class _Record(abc.ABC):
     @property
     def record_path(self) -> pathlib.Path:
         return self.model_path / self.id
+
+    @property
+    def metadata(self) -> dict[str, Any] | None:
+        return self.load_json_file(METADATA_JSON)
+
+    # Methods
 
     def exists(self) -> bool:
         return self.record_path.exists() and self.record_path.is_dir() and self.metadata is not None
@@ -100,12 +108,6 @@ class _Record(abc.ABC):
         self.model_path.mkdir(exist_ok=True)
         self.record_path.mkdir(exist_ok=True)
         self.save_json_file(METADATA_JSON, kwargs)
-
-    # Metadata
-
-    @property
-    def metadata(self) -> dict[str, Any] | None:
-        return self.load_json_file(METADATA_JSON)
 
     # Files
 
@@ -160,6 +162,8 @@ class _Record(abc.ABC):
 
 
 class _YoutubeRecord(_Record, abc.ABC):
+    # Fields / Properties
+
     @property
     def youtube_info(self) -> dict[str, Any] | None:
         return self.load_json_file(YOUTUBE_JSON)
@@ -183,6 +187,8 @@ class _YoutubeRecord(_Record, abc.ABC):
 
 
 class _HolodexRecord(_YoutubeRecord, abc.ABC):
+    # Fields / Properties
+
     @property
     def holodex_info(self) -> dict[str, Any] | None:
         return self.load_json_file(HOLODEX_JSON)
@@ -216,6 +222,8 @@ class _HolodexRecord(_YoutubeRecord, abc.ABC):
             return self.holodex_info.get("id")
         return None
 
+    # Methods
+
     @classmethod
     def from_holodex_id(cls: type[Self], *, storage: Storage, id: str) -> Self:
         # id == holodex_id right now
@@ -227,6 +235,8 @@ RecordT = TypeVar("RecordT", bound=_Record)
 
 class ChannelRecord(_HolodexRecord):
     model_name = "channel"
+
+    # Fields / Properties
 
     @property
     def refresh_holodex_info(self) -> str:
@@ -251,6 +261,8 @@ class ChannelRecord(_HolodexRecord):
         if self.holodex_id:
             return f"https://holodex.net/channel/{self.holodex_id}"
         return None
+
+    # Methods
 
     def create(
         self,
@@ -291,6 +303,8 @@ class ChannelRecord(_HolodexRecord):
 
 class VideoRecord(_HolodexRecord):
     model_name = "video"
+
+    # Fields / Properties
 
     @property
     def channel_id(self) -> str:
@@ -348,6 +362,8 @@ class VideoRecord(_HolodexRecord):
     @property
     def subtitles_path(self) -> pathlib.Path:
         return self.record_path / "subtitles/"
+
+    # Methods
 
     def create(self, channel_id: str, fetch_subtitles: bool = True, **kwargs) -> None:
         return super().create(channel_id=channel_id, **kwargs)
