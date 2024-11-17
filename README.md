@@ -4,6 +4,8 @@ Tool for searching transcriptions of vtuber videos.
 
 Uses data from [Holodex](https://holodex.net) and (automatic) subtitles from Youtube.
 
+![example.png](./example.png)
+
 
 ## Setup
 
