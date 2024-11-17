@@ -176,6 +176,11 @@ class _YoutubeRecord(_Record, abc.ABC):
     def youtube_id(self) -> str | None:
         return self.youtube_info.get("id") if self.youtube_info else None
 
+    @property
+    @abc.abstractmethod
+    def youtube_url(self) -> str | None:
+        raise NotImplementedError()
+
 
 class _HolodexRecord(_YoutubeRecord, abc.ABC):
     @property
@@ -197,6 +202,11 @@ class _HolodexRecord(_YoutubeRecord, abc.ABC):
         elif self.youtube_info:
             return self.youtube_info.get("id")
         return None
+
+    @property
+    @abc.abstractmethod
+    def holodex_url(self) -> str | None:
+        raise NotImplementedError()
 
     @property
     def youtube_id(self) -> str | None:
@@ -227,6 +237,20 @@ class ChannelRecord(_HolodexRecord):
     def refresh_videos(self) -> str:
         """False if this channel should be skipped when refreshing video list"""
         return self.metadata["refresh_videos"]
+
+    @property
+    def youtube_url(self) -> str | None:
+        """Implemented"""
+        if self.youtube_id:
+            return f"https://www.youtube.com/channel/{self.youtube_id}"
+        return None
+
+    @property
+    def holodex_url(self) -> str | None:
+        """Implemented"""
+        if self.holodex_id:
+            return f"https://holodex.net/channel/{self.holodex_id}"
+        return None
 
     def create(
         self,
@@ -300,6 +324,26 @@ class VideoRecord(_HolodexRecord):
     def members_only(self, value: bool) -> None:
         metadata = dict(self.metadata, members_only=value)
         self.save_json_file(METADATA_JSON, metadata)
+
+    @property
+    def title(self) -> str | None:
+        if self.holodex_info and (title := self.holodex_info.get("title")):
+            return title
+        return None
+
+    @property
+    def youtube_url(self) -> str | None:
+        """Implemented"""
+        if self.youtube_id:
+            return f"https://www.youtube.com/watch?v={self.youtube_id}"
+        return None
+
+    @property
+    def holodex_url(self) -> str | None:
+        """Implemented"""
+        if self.holodex_id:
+            return f"https://holodex.net/watch/{self.holodex_id}"
+        return None
 
     @property
     def subtitles_path(self) -> pathlib.Path:

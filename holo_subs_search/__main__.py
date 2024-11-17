@@ -10,7 +10,7 @@ import time
 
 import yt_dlp
 
-from . import holodex_downloader, sub_parser, ydl_downloader
+from . import holodex_downloader, sub_parser, sub_search, ydl_downloader
 from .storage import ChannelRecord, Storage, VideoRecord
 
 _logger = logging.getLogger(__name__)
@@ -36,15 +36,19 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
                 _logger.warning("Fetched unexpected file: %s", name)
 
     except yt_dlp.utils.DownloadError as e:
-        if "members-only" in e.msg and not video.members_only:
+        if not video.members_only and any(
+            x in e.msg for x in ("members-only", "This video is available to this channel's members")
+        ):
             _logger.error("Unexpected members-only download error, marking video as members-only: %s", e)
             video.members_only = True
-        elif "Private video" in e.msg or "This video is private" in e.msg:
+        elif any(x in e.msg for x in ("Private video", "This video is private")):
             _logger.error("Private video, subtitle fetch will be disabled: %s", e)
             video.fetch_subtitles = False
         elif "Video unavailable" in e.msg:
             _logger.error("Unavailable video, subtitle fetch will be disabled: %s", e)
             video.fetch_subtitles = False
+        elif "Sign in to confirm your age" in e.msg:
+            _logger.error("Age confirmation required. Run again with cookies: %s", e)
         elif "HTTP Error 429" in e.msg:
             RATE_LIMIT_COUNT += 1
             sleep_time = 2**RATE_LIMIT_COUNT
@@ -87,6 +91,33 @@ def _process_video_subtitles(storage: Storage) -> None:
             video.save_subtitle(f"parsed.{lang}.json", json.dumps(parsed.to_json()))
 
 
+def _search_video_subtitles(
+    storage: Storage,
+    value: str,
+    *,
+    regex: bool = False,
+    # lines_before: int = 3,
+    # lines_after: int = 3,
+) -> None:  # FIXME: unfinished and prints wrong lines
+    for video in storage.list_videos():
+        for name in video.list_subtitles(filter_source=["parsed"], filter_ext=["json"]):
+            parsed = sub_parser.SubFile.from_json(json.loads(video.load_subtitle(name)))
+            searchable = sub_search.SearchableSubFile.from_sub_file(parsed)
+
+            header_printed = False
+            for indexes in searchable.search(value=value, regex=regex):
+                if not header_printed:
+                    print(f">>>>>>>>>> {video.youtube_url} | {parsed.lang} | {video.title}")
+                    header_printed = True
+
+                print("-----------")
+                for idx in indexes:
+                    ts_line = parsed.lines[idx]
+                    ts_url = f"{video.youtube_url}&t={int(ts_line.start.total_seconds())}"
+
+                    print(f"{ts_url} | {ts_line.start} | {ts_line.content}")
+
+
 # flake8: noqa: C801
 def main() -> None:
     # parse arguments
@@ -126,12 +157,16 @@ def main() -> None:
         "--youtube-cookies-from-browser", default=None, help="Eg. `chrome`, see yt-dlp docs for more options"
     )
     parser.add_argument(
-        "--process-subtitles",
+        "--parse-subtitles",
         action="store_true",
     )
     parser.add_argument(
-        "--search-subtitles",
+        "--search",
         default=None,
+    )
+    parser.add_argument(
+        "--search-regex",
+        action="store_true",
     )
     parser.add_argument(
         "-d",
@@ -206,9 +241,15 @@ def main() -> None:
 
     # processing subtitles into usable format
 
-    if args.process_subtitles:
-        _logger.info("Processing subtitles...")
+    if args.parse_subtitles:
+        _logger.info("Parsing subtitles...")
         _process_video_subtitles(storage)
+
+    # searching parsed subtitles
+
+    if args.search is not None:
+        _logger.info("Searching subtitles...")
+        _search_video_subtitles(storage, value=args.search, regex=args.search_regex)
 
 
 if __name__ == "__main__":
