@@ -65,13 +65,19 @@ def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_br
             video.fetch_subtitles = False
 
 
-def _process_video_subtitles(storage: Storage) -> None:
+def _search_video_subtitles(
+    storage: Storage,
+    value: str,
+    *,
+    regex: bool = False,
+    filter_source: list[str] | None = None,
+    filter_lang: list[str] | None = None,
+    # lines_before: int = 3,
+    # lines_after: int = 3,
+) -> None:  # FIXME: unfinished and prints wrong lines
     for video in storage.list_videos():
-        for name in video.list_subtitles(filter_ext=["srt"]):
+        for name in video.list_subtitles(filter_source=filter_source, filter_lang=filter_lang, filter_ext=["srt"]):
             source, lang, ext = name.split(".")
-
-            if bool(list(video.list_subtitles(filter_source=["parsed"], filter_lang=[lang], filter_ext=["json"]))):
-                continue
 
             content = video.load_subtitle(name)
             parsed = sub_parser.SubFile(
@@ -80,20 +86,6 @@ def _process_video_subtitles(storage: Storage) -> None:
                 lang=lang,
                 lines=[x for x in sub_parser.parse_srt_file(content)],
             )
-            video.save_subtitle(f"parsed.{lang}.json", json.dumps(parsed.to_json()))
-
-
-def _search_video_subtitles(
-    storage: Storage,
-    value: str,
-    *,
-    regex: bool = False,
-    # lines_before: int = 3,
-    # lines_after: int = 3,
-) -> None:  # FIXME: unfinished and prints wrong lines
-    for video in storage.list_videos():
-        for name in video.list_subtitles(filter_source=["parsed"], filter_ext=["json"]):
-            parsed = sub_parser.SubFile.from_json(json.loads(video.load_subtitle(name)))
             searchable = sub_search.SearchableSubFile.from_sub_file(parsed)
 
             header_printed = False
@@ -144,15 +136,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--fetch-subtitles-langs",
-        default="en,jp,id",
+        nargs="+",
+        type=str,
+        default=["en", "jp", "id"],
+        help="`--search-langs en jp id`",
     )
     parser.add_argument(
-        "--youtube-members",
-        default="",
-        help="`ID,ID,ID` Youtube IDs of channels that should also fetch membership videos",
+        "--yt-members",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--yt-members ID ID ID` Youtube IDs of channels that should also fetch membership videos",
     )
     parser.add_argument(
-        "--youtube-cookies-from-browser", default=None, help="Eg. `chrome`, see yt-dlp docs for more options"
+        "--yt-cookies-from-browser", default=None, help="Eg. `chrome`, see yt-dlp docs for more options"
     )
     parser.add_argument(
         "--parse-subtitles",
@@ -161,6 +158,20 @@ def main() -> None:
     parser.add_argument(
         "--search",
         default=None,
+    )
+    parser.add_argument(
+        "--search-sources",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--search-sources youtube foo bar`",
+    )
+    parser.add_argument(
+        "--search-langs",
+        nargs="+",
+        type=str,
+        default=["en", "jp", "id"],
+        help="`--search-langs en jp id`",
     )
     parser.add_argument(
         "--search-regex",
@@ -229,31 +240,31 @@ def main() -> None:
 
     if args.fetch_subtitles:
         _logger.info("Fetching subtitles...")
-        langs = [x_s for x in args.fetch_subtitles_langs.split(",") if (x_s := x.strip())]
-        youtube_members = [x_s for x in args.youtube_members.split(",") if (x_s := x.strip())]
 
         for video in storage.list_videos():
             if video.youtube_id and video.fetch_subtitles and not list(video.list_subtitles(filter_source=["youtube"])):
                 if video.members_only:
                     channel = storage.get_channel(video.channel_id)
-                    if not channel.exists() or channel.youtube_id not in youtube_members:
+                    if not channel.exists() or channel.youtube_id not in args.yt_members:
                         continue
-                _fetch_video_subtitles(video, langs, cookies_from_browser=args.youtube_cookies_from_browser)
+                _fetch_video_subtitles(
+                    video, args.fetch_subtitles_langs, cookies_from_browser=args.yt_cookies_from_browser
+                )
 
         for video in storage.list_videos():
             video.update_gitignore()
-
-    # processing subtitles into usable format
-
-    if args.parse_subtitles:
-        _logger.info("Parsing subtitles...")
-        _process_video_subtitles(storage)
 
     # searching parsed subtitles
 
     if args.search is not None:
         _logger.info("Searching subtitles...")
-        _search_video_subtitles(storage, value=args.search, regex=args.search_regex)
+        _search_video_subtitles(
+            storage,
+            value=args.search,
+            regex=args.search_regex,
+            filter_source=args.search_sources or None,
+            filter_lang=args.search_langs or None,
+        )
 
 
 if __name__ == "__main__":
