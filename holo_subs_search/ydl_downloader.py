@@ -25,8 +25,12 @@ def get_video_params(download_path: str, langs: list[str], cookies_from_browser:
             "infojson": download_path,
         },
         "outtmpl": {
-            "subtitle": "%(id)s.%(ext)s",  # ID.en.srt
-            "infojson": "%(id)s",  # ID.info.json
+            # Used by temp files, I have stripped it to just ID to fix the "File name too long" error
+            "default": "%(id)s.%(ext)s",
+            # ID.en.srt
+            "subtitle": "%(id)s.%(ext)s",
+            # ID.info.json
+            "infojson": "%(id)s",
         },
     }
 
