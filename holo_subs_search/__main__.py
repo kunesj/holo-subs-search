@@ -86,7 +86,7 @@ def _search_video_subtitles(
     filter_lang: list[str] | None = None,
     # lines_before: int = 3,
     # lines_after: int = 3,
-) -> None:  # FIXME: unfinished and prints wrong lines
+) -> None:  # FIXME: unfinished
     for video in storage.list_videos():
         for name in video.list_subtitles(filter_source=filter_source, filter_lang=filter_lang, filter_ext=["srt"]):
             source, lang, ext = name.split(".")
@@ -110,7 +110,7 @@ def _search_video_subtitles(
 
                 print("-----------")
                 for idx in indexes:
-                    ts_line = parsed.lines[idx]
+                    ts_line = searchable.lines[idx]
                     ts_url = f"{video.youtube_url}&t={int(ts_line.start.total_seconds())}"
 
                     print(f"{ts_url} | {ts_line.start} | {ts_line.content}")

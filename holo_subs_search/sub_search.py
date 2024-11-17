@@ -5,7 +5,7 @@ import dataclasses
 import re
 from typing import Self
 
-from .sub_parser import Iterator, SubFile
+from .sub_parser import Iterator, SubFile, SubLine
 
 
 @dataclasses.dataclass
@@ -26,7 +26,11 @@ class SearchableSubFile:
 
     sub_file: SubFile
     content: str
-    indexed: list[IndexedLine]
+    indexed: list[IndexedLine]  # must be sorted
+
+    @property
+    def lines(self) -> list[SubLine]:
+        return self.sub_file.lines
 
     @classmethod
     def from_sub_file(cls: type[Self], sub_file: SubFile) -> Self:
@@ -54,26 +58,38 @@ class SearchableSubFile:
 
     def match_to_line_indexes(self, match_start: int, match_end: int) -> list[int]:
         # uses binary search for speed
-        lines_start_idx = bisect.bisect_left(self.indexed, match_start, key=lambda x: x.start)
-        lines_stop_idx = bisect.bisect_right(self.indexed, match_end, lo=lines_start_idx, key=lambda x: x.end)
 
-        indexed_lines = self.indexed[lines_start_idx : lines_stop_idx + 1]
+        # self.indexed[:_idx] where all "x.start <= match_start"
+        _idx = bisect.bisect_right(self.indexed, match_start, key=lambda x: x.start)
+        lines_start_idx = max(_idx - 1, 0)
+
+        # self.indexed[:_idx] where all "x.end < match_end"
+        _idx = bisect.bisect_left(self.indexed, match_end, lo=lines_start_idx, key=lambda x: x.end)
+        lines_stop_idx = min(_idx + 1, len(self.indexed))
+
+        indexed_lines = self.indexed[lines_start_idx:lines_stop_idx]
         if not indexed_lines:
             raise RuntimeError("No indexed lines found, something is wrong")
 
         return [x.line_index for x in indexed_lines]
 
-    def search_exact(self, value: str) -> Iterator[list[int]]:
+    def search_exact(self, value: str, case_sensitive: bool = False) -> Iterator[list[int]]:
         if not value:
             return
 
+        if case_sensitive:
+            content = self.content
+        else:
+            content = self.content.lower()
+            value = value.lower()
+
         offset = 0
-        while idx := self.content[offset:].find(value):
+        while idx := content[offset:].find(value):
             if idx < 0:
                 return
 
             match_start = offset + idx
-            match_end = offset + idx
+            match_end = match_start + len(value)
 
             if offset == match_end:
                 break  # empty match, braking to prevent infinite search
@@ -81,12 +97,14 @@ class SearchableSubFile:
             yield self.match_to_line_indexes(match_start=match_start, match_end=match_end)
             offset = match_end
 
-    def search_regex(self, value: str) -> Iterator[list[int]]:
+    def search_regex(self, value: str, case_sensitive: bool = False) -> Iterator[list[int]]:
         if not value:
             return
 
+        flags = re.NOFLAG if case_sensitive else re.IGNORECASE
         offset = 0
-        while match := re.search(value, self.content[offset:], flags=re.IGNORECASE):
+
+        while match := re.search(value, self.content[offset:], flags=flags):
             match_start = offset + match.start()
             match_end = offset + match.end()
 
@@ -96,10 +114,10 @@ class SearchableSubFile:
             yield self.match_to_line_indexes(match_start=match_start, match_end=match_end)
             offset = match_end
 
-    def search(self, value: str, regex: bool = False) -> Iterator[list[int]]:
+    def search(self, value: str, regex: bool = False, case_sensitive: bool = False) -> Iterator[list[int]]:
         if regex:
-            for indexes in self.search_regex(value):
+            for indexes in self.search_regex(value, case_sensitive=case_sensitive):
                 yield indexes
         else:
-            for indexes in self.search_exact(value):
+            for indexes in self.search_exact(value, case_sensitive=case_sensitive):
                 yield indexes
