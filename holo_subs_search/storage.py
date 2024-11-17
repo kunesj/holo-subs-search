@@ -276,7 +276,7 @@ class ChannelRecord(_HolodexRecord):
             record.create(**(default_metadata or {}))
             record.holodex_info = holodex_info
 
-        elif update_holodex_info:
+        elif update_holodex_info or not record.holodex_info:
             record.holodex_info = holodex_info
 
         return record
@@ -375,7 +375,7 @@ class VideoRecord(_HolodexRecord):
             record.create(**default_metadata)
             record.holodex_info = holodex_info
 
-        elif update_holodex_info:
+        elif update_holodex_info or not record.holodex_info:
             record.holodex_info = holodex_info
 
         return record
