@@ -245,6 +245,9 @@ def main() -> None:
                         continue
                 _fetch_video_subtitles(video, langs, cookies_from_browser=args.youtube_cookies_from_browser)
 
+        for video in storage.list_videos():
+            video.update_gitignore()
+
     # processing subtitles into usable format
 
     if args.parse_subtitles:

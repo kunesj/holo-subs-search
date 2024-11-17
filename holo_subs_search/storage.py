@@ -424,3 +424,10 @@ class VideoRecord(_HolodexRecord):
     def load_subtitle(self, name: str) -> str | None:
         file_path = self.subtitles_path / name
         return file_path.read_text() if file_path.exists() else None
+
+    def update_gitignore(self) -> None:
+        gitignore_path = self.record_path / ".gitignore"
+        if self.members_only and not gitignore_path.exists():
+            gitignore_path.write_text("/subtitles\n")
+        elif not self.members_only and gitignore_path.exists():
+            gitignore_path.unlink()
