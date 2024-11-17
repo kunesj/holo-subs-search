@@ -196,10 +196,6 @@ def main() -> None:
         "--yt-cookies-from-browser", default=None, help="Eg. `chrome`, see yt-dlp docs for more options"
     )
     parser.add_argument(
-        "--parse-subtitles",
-        action="store_true",
-    )
-    parser.add_argument(
         "--search",
         default=None,
     )
