@@ -159,7 +159,7 @@ class Storage(MetadataMixin):
 
                 gitignore_path = record_path / ".gitignore"
                 if gitignore_path.exists():
-                    gitignore_path.write_text(gitignore_path.read_text().replace("subtitles/", "content/"))
+                    gitignore_path.write_text(gitignore_path.read_text().replace("/subtitles\n", "/content\n"))
 
         self.metadata = dict(self.metadata, version="0.2.0")
 
