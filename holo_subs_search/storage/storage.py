@@ -52,6 +52,7 @@ class Storage(MetadataMixin):
             visited.add(version)
 
             self.migrate_0_1_0()
+            self.migrate_0_2_0()
 
             if version == self.metadata["version"]:
                 break
@@ -162,6 +163,15 @@ class Storage(MetadataMixin):
                     gitignore_path.write_text(gitignore_path.read_text().replace("/subtitles\n", "/content\n"))
 
         self.metadata = dict(self.metadata, version="0.2.0")
+
+    def migrate_0_2_0(self) -> None:
+        if self.metadata["version"] != "0.2.0":
+            return
+        _logger.info("Storage migration from version 0.2.0")
+
+        # storage format had only minor changes that should be compatible
+
+        self.metadata = dict(self.metadata, version="0.3.0")
 
     # Generic Records
 
