@@ -33,6 +33,12 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     @property
     def channel_id(self) -> str:
+        """
+        IMPORTANT:
+            Holodex channel ID might not match actual channel ID of the YouTube video!
+            Example: https://holodex.net/watch/sohZeczXXdY
+            But it should not break anything.
+        """
         return self.metadata["channel_id"]
 
     @property
@@ -154,7 +160,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                             info = json.loads(f.read())
 
                             # trim down the info to only useful data
-                            for key in ["formats", "automatic_captions", "subtitles", "thumbnails"]:
+                            for key in ["formats", "automatic_captions", "subtitles", "thumbnails", "heatmap"]:
                                 info.pop(key, None)
 
                             self.youtube_info = info
