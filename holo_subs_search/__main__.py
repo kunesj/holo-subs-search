@@ -8,73 +8,14 @@ import pathlib
 import time
 
 import termcolor
-import yt_dlp
 
-from . import holodex_tools, sub_parser, sub_search, ydl_tools
-from .storage import ChannelRecord, Storage, VideoRecord
+from . import holodex_tools, sub_parser, sub_search
+from .storage import ChannelRecord, Flags, Storage, VideoRecord
+from .storage.mixins.content_mixin import ContentItemType
 
 _logger = logging.getLogger(__name__)
-DEFAULT_STORAGE_PATH = (pathlib.Path(os.path.dirname(__file__)) / "../data/").absolute()
-
-
-def _fetch_video_subtitles(video: VideoRecord, langs: list[str], cookies_from_browser: str | None = None) -> None:
-    _logger.info("Fetching Youtube subtitles for video %s - %s", video.id, video.published_at)
-
-    # fetch info.json and subtitles
-
-    try:
-        for yt_id, name, file_path in ydl_tools.download_video_info_and_subtitles(
-            video_ids=[video.youtube_id],
-            langs=langs,
-            cookies_from_browser=cookies_from_browser,
-        ):
-            if name == "info.json":
-                pass  # not needed with holodex.json
-            elif name.endswith(".srt"):
-                with open(file_path, "r") as f:
-                    video.save_subtitle(f"youtube.{name}", f.read())  # youtube.en.srt
-            else:
-                _logger.warning("Fetched unexpected file: %s", name)
-
-    except yt_dlp.utils.DownloadError as e:
-        if not video.members_only and any(
-            x in e.msg for x in ("members-only", "This video is available to this channel's members")
-        ):
-            _logger.error("Unexpected members-only download error, marking video as members-only: %s", e)
-            video.members_only = True
-        elif any(x in e.msg for x in ("Private video", "This video is private")):
-            _logger.error("Private video, subtitle fetch will be disabled: %s", e)
-            video.skip_subtitles += ["all"]
-        elif "Video unavailable" in e.msg:
-            _logger.error("Unavailable video, subtitle fetch will be disabled: %s", e)
-            video.skip_subtitles += ["all"]
-        elif "Sign in to confirm your age" in e.msg:
-            _logger.error("Age confirmation required. Run again with cookies: %s", e)
-        else:
-            raise
-
-    else:
-        _skip_missing_subtitles(video, langs)
-
-
-def _skip_missing_subtitles(video: VideoRecord, langs: list[str], days: int = 7) -> None:
-    """
-    disable subtitle fetch for videos that were published 1+week ago and are missign the subtitles
-    """
-    week_ago = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=days)
-    is_old = video.published_at is None or video.published_at <= week_ago
-
-    if is_old:
-        stored_langs = {name.split(".")[1] for name in video.list_subtitles()}
-        missing_langs = {lang for lang in langs if lang not in stored_langs}
-
-        if missing_langs:
-            _logger.info(
-                "No subtitles for %s languages fetched for older video ID=%s, will be skipped next time",
-                missing_langs,
-                video.id,
-            )
-            video.skip_subtitles += list(missing_langs)
+DIR_PATH = pathlib.Path(os.path.dirname(__file__))
+DEFAULT_STORAGE_PATH = (DIR_PATH / "../data/").absolute()
 
 
 def _search_video_subtitles(
@@ -87,15 +28,21 @@ def _search_video_subtitles(
     time_before: int = 15,
     time_after: int = 15,
 ) -> None:
-    for video in storage.list_videos():
-        for name in video.list_subtitles(filter_source=filter_source, filter_lang=filter_lang, filter_ext=["srt"]):
-            source, lang, ext = name.split(".")
+    def _item_filter(x: ContentItemType) -> bool:
+        return (
+            x.item_type == "subtitle"
+            and (filter_source is None or x.source in filter_source)
+            and (filter_lang is None or x.lang in filter_lang)
+            and x.subtitle_file.endswith(".srt")
+        )
 
-            content = video.load_subtitle(name)
+    for video in storage.list_videos():
+        for item in video.list_content(_item_filter):
+            content = item.subtitle_path.read_text()
             parsed = sub_parser.SubFile(
                 timestamp=time.time(),
-                source=source,
-                lang=lang,
+                source=item.source,
+                lang=item.lang,
                 lines=[x for x in sub_parser.parse_srt_file(content)],
             )
             searchable = sub_search.SearchableSubFile.from_sub_file(parsed)
@@ -111,7 +58,7 @@ def _search_video_subtitles(
                         parsed.lang,
                     ]
 
-                    if video.members_only:
+                    if Flags.YOUTUBE_MEMBERSHIP in video.flags:
                         parts.append("members-only")
 
                     parts.append(video.title)
@@ -158,6 +105,15 @@ def main() -> None:
         default=DEFAULT_STORAGE_PATH,
     )
     parser.add_argument(
+        "-d",
+        "--debug",
+        type=int,
+        choices=[50, 40, 30, 20, 10, 1],
+        default=20,
+        help="Set global debug level [CRITICAL=50, ERROR=40, WARNING=30, INFO=20, DEBUG=10, SPAM=1]",
+    )
+    # ---- fetching metadata ----
+    parser.add_argument(
         "--fetch-org-channels",
         default=None,  # "All Vtubers", "Hololive", "Nijisanji", "Independents"
     )
@@ -174,30 +130,39 @@ def main() -> None:
         action="store_true",
         help="If already stored Holodex/Youtube/... info should be updated",
     )
+    # ---- YouTube: membership ----
     parser.add_argument(
-        "--fetch-subtitles",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--fetch-subtitles-langs",
-        nargs="+",
-        type=str,
-        default=["en"],
-        help="`--fetch-subtitles-langs en jp id`",
-    )
-    parser.add_argument(
-        "--yt-members",
+        "--youtube-memberships",
         nargs="+",
         type=str,
         default=[],
-        help="`--yt-members ID ID ID` Youtube IDs of channels that should also fetch membership videos",
+        help="`--youtube-memberships ID ID ID` Youtube IDs of channels that should also fetch membership videos",
     )
     parser.add_argument(
-        "--yt-cookies-from-browser", default=None, help="Eg. `chrome`, see yt-dlp docs for more options"
+        "--youtube-cookies-from-browser",
+        default=None,
+        help="Eg. `chrome`, see yt-dlp docs for more options",
     )
+    # ---- YouTube: fetch subtitles ----
+    parser.add_argument(
+        "--youtube-fetch-subtitles",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--youtube-fetch-subtitles-langs",
+        nargs="+",
+        type=str,
+        default=["en"],
+        help="`--youtube-fetch-subtitles-langs en jp id`",
+    )
+    # ---- search subtitles ----
     parser.add_argument(
         "--search",
         default=None,
+    )
+    parser.add_argument(
+        "--search-regex",
+        action="store_true",
     )
     parser.add_argument(
         "--search-sources",
@@ -212,18 +177,6 @@ def main() -> None:
         type=str,
         default=["en"],
         help="`--search-langs en jp id`",
-    )
-    parser.add_argument(
-        "--search-regex",
-        action="store_true",
-    )
-    parser.add_argument(
-        "-d",
-        "--debug",
-        type=int,
-        choices=[50, 40, 30, 20, 10, 1],
-        default=20,
-        help="Set global debug level [CRITICAL=50, ERROR=40, WARNING=30, INFO=20, DEBUG=10, SPAM=1]",
     )
     args = parser.parse_args()
 
@@ -245,7 +198,7 @@ def main() -> None:
 
     if args.refresh_channels:
         for channel in storage.list_channels():
-            if channel.holodex_id and channel.refresh_holodex_info and args.update_stored:
+            if channel.holodex_id and Flags.HOLODEX_PRESERVE not in channel.flags and args.update_stored:
                 fetch_holodex_ids.add(channel.holodex_id)
 
     if args.fetch_org_channels:
@@ -269,7 +222,9 @@ def main() -> None:
         _logger.info("Refreshing videos...")
 
         holodex_channel_ids = {
-            channel.holodex_id for channel in storage.list_channels() if channel.holodex_id and channel.refresh_videos
+            channel.holodex_id
+            for channel in storage.list_channels()
+            if channel.holodex_id and Flags.MENTIONS_ONLY not in channel.flags
         }
         for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
             if value.status in ("new", "upcoming", "live"):
@@ -278,31 +233,35 @@ def main() -> None:
 
     # fetching subtitles
 
-    if args.fetch_subtitles:
-        _logger.info("Fetching subtitles...")
+    if args.youtube_fetch_subtitles:
+        _logger.info("Fetching YouTube subtitles...")
 
-        for video in storage.list_videos():
-            if not video.youtube_id:
-                continue  # not a youtube video?
-            elif "all" in video.skip_subtitles:
-                continue  # skip all languages
+        for video in storage.list_videos(lambda x: x.youtube_id):
+            # FIXME: a way to refetch private/unavailable/memberships
+            if Flags.YOUTUBE_PRIVATE in video.flags:
+                continue
+            elif Flags.YOUTUBE_UNAVAILABLE in video.flags:
+                continue
+            elif Flags.YOUTUBE_AGE_RESTRICTED in video.flags and not args.youtube_cookies_from_browser:
+                continue
 
-            fetch_langs = set(args.fetch_subtitles_langs) - set(video.skip_subtitles)
-            for name in video.list_subtitles(filter_source=["youtube"], filter_lang=list(fetch_langs)):
-                source, lang, ext = name.split(".")
-                fetch_langs -= {lang}
+            if Flags.YOUTUBE_MEMBERSHIP in video.flags:
+                channel = storage.get_channel(video.channel_id)
+                if not channel.exists() or channel.youtube_id not in args.youtube_memberships:
+                    continue  # not accessible membership video
+
+            fetch_langs = set(args.youtube_fetch_subtitles_langs) - set(video.youtube_subtitles.keys())
+            for item in video.list_content(
+                lambda x: x.item_type == "subtitle" and x.source == "youtube" and x.lang in fetch_langs
+            ):
+                fetch_langs -= {item.lang}
 
             if not fetch_langs:
                 continue  # no langs to fetch
 
-            if video.members_only:
-                channel = storage.get_channel(video.channel_id)
-                if not channel.exists() or channel.youtube_id not in args.yt_members:
-                    continue  # not accessible membership video
+            video.fetch_youtube_subtitles(list(fetch_langs), cookies_from_browser=args.youtube_cookies_from_browser)
 
-            _fetch_video_subtitles(video, list(fetch_langs), cookies_from_browser=args.yt_cookies_from_browser)
-
-        for video in storage.list_videos():
+        for video in storage.list_videos(lambda x: x.youtube_id):
             video.update_gitignore()
 
     # searching parsed subtitles

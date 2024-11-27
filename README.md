@@ -33,14 +33,14 @@ Uses data from [Holodex](https://holodex.net) and (automatic) subtitles from You
 - Fetch subtitles for all videos (This takes a while). Only English subtitles are downloaded by default.
 
     ```bash
-    python3.11 -m holo_subs_search --fetch-subtitles
-    python3.11 -m holo_subs_search --fetch-subtitles --fetch-subtitles-langs en jp id
+    python3.11 -m holo_subs_search --youtube-fetch-subtitles
+    python3.11 -m holo_subs_search --youtube-fetch-subtitles --youtube-fetch-subtitles-langs en jp id
     ```
 
 - (Optional) Fetch subtitles for membership videos. This requires you to have membership and be logged in your browser.
 
     ```bash
-    python3.11 -m holo_subs_search --fetch-subtitles --yt-members UCHsx4Hqa-1ORjQTh9TYDhww --yt-cookies-from-browser chrome
+    python3.11 -m holo_subs_search --youtube-fetch-subtitles --youtube-memberships UCHsx4Hqa-1ORjQTh9TYDhww --youtube-cookies-from-browser chrome
     ```
 
    Membership videos automatically create `.gitignore` files that exclude fetched subtitles from git, so that the storage directory can be a git repo.

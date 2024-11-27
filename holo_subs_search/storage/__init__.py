@@ -1,3 +1,4 @@
-from .channel_record import ChannelRecord
+from .mixins import Flags
+from .channel import ChannelRecord
 from .storage import Storage
-from .video_record import VideoRecord
+from .video import VideoRecord

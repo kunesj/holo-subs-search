@@ -9,29 +9,22 @@ from typing import TYPE_CHECKING, Any, Iterator, Self
 from holodex.model.channel import Channel as HolodexChannel
 from holodex.model.channels import LiteChannel as HolodexLiteChannel
 
-from .holodex_record import HolodexRecord
+from ..utils import json_dumps
+from .mixins.flags_mixin import FlagsMixin
+from .mixins.holodex_mixin import HolodexMixin
+from .record import Record
 
 if TYPE_CHECKING:
     from .storage import Storage
-    from .video_record import VideoRecord
+    from .video import VideoRecord
 
 _logger = logging.getLogger(__name__)
 
 
-class ChannelRecord(HolodexRecord):
+class ChannelRecord(HolodexMixin, FlagsMixin, Record):
     model_name = "channel"
 
     # Fields / Properties
-
-    @property
-    def refresh_holodex_info(self) -> str:
-        """False if this channel should be skipped when refreshing channel info"""
-        return self.metadata["refresh_holodex_info"]
-
-    @property
-    def refresh_videos(self) -> str:
-        """False if this channel should be skipped when refreshing video list"""
-        return self.metadata["refresh_videos"]
 
     @property
     def youtube_url(self) -> str | None:
@@ -49,14 +42,6 @@ class ChannelRecord(HolodexRecord):
 
     # Methods
 
-    def create(
-        self,
-        refresh_holodex_info: bool = True,
-        refresh_videos: bool = True,
-        **kwargs,
-    ) -> None:
-        return super().create(refresh_holodex_info=refresh_holodex_info, refresh_videos=refresh_videos, **kwargs)
-
     @classmethod
     def from_holodex(
         cls: type[Self],
@@ -66,11 +51,12 @@ class ChannelRecord(HolodexRecord):
         default_metadata: dict[str, Any] | None = None,
         update_holodex_info: bool = True,
     ) -> Self:
-        holodex_info = json.loads(json.dumps(value._response))
+        holodex_info = json.loads(json_dumps(value._response))
         record = cls.from_holodex_id(storage=storage, id=value.id)
 
         if not record.exists():
-            record.create(**(default_metadata or {}))
+            metadata = cls.build_metadata(**(default_metadata or {}))
+            record.create(metadata)
             record.holodex_info = holodex_info
 
         elif update_holodex_info or not record.holodex_info:

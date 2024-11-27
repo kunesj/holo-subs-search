@@ -4,31 +4,34 @@ from __future__ import annotations
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Any, Self
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from .youtube_record import YoutubeRecord
+from .youtube_mixin import YoutubeMixin
 
 if TYPE_CHECKING:
-    from .storage import Storage
+    from ..storage import Storage
 
 _logger = logging.getLogger(__name__)
-HOLODEX_JSON = "holodex.json"
 
 
-class HolodexRecord(YoutubeRecord, abc.ABC):
+class HolodexMixin(YoutubeMixin, abc.ABC):
+    HOLODEX_JSON: ClassVar[str] = "holodex.json"
+
     # Fields / Properties
 
     @property
-    def holodex_info(self) -> dict[str, Any] | None:
-        return self.load_json_file(HOLODEX_JSON)
+    def holodex_info(self) -> MappingProxyType[str, Any] | None:
+        raw = self.load_json_file(self.HOLODEX_JSON)
+        return None if raw is None else MappingProxyType(raw)
 
     @holodex_info.setter
     def holodex_info(self, value: dict[str, Any] | None) -> None:
         if value is None:
-            _logger.info("Removing Holodex info for %r ID=%s", self.model_name, self.id)
+            _logger.info("Removing Holodex info for %r", self)
         else:
-            _logger.info("Saving Holodex info for %r ID=%s", self.model_name, self.id)
-        self.save_json_file(HOLODEX_JSON, value)
+            _logger.info("Saving Holodex info for %r", self)
+        self.save_json_file(self.HOLODEX_JSON, value)
 
     @property
     def holodex_id(self) -> str | None:

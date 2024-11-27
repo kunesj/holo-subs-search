@@ -1,9 +1,17 @@
 #!/usr/bin/env python3.11
 
 import asyncio
-from typing import AsyncIterator, Iterator, TypeVar
+import datetime
+import json
+from typing import Annotated, Any, AsyncIterator, Iterator, TypeVar
+
+import annotated_types
 
 T = TypeVar("T")
+
+AnyDateTime = Annotated[datetime.datetime, ...]
+NaiveDateTime = Annotated[datetime.datetime, annotated_types.Timezone(None)]
+AwareDateTime = Annotated[datetime.datetime, annotated_types.Timezone(...)]
 
 
 def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
@@ -25,3 +33,13 @@ def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
             if done:
                 break
             yield obj
+
+
+def _json_dumps_default(obj: Any) -> Any:
+    if isinstance(obj, (set, tuple)):
+        return [*obj]
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
+def json_dumps(obj) -> str:
+    return json.dumps(obj, default=_json_dumps_default)
