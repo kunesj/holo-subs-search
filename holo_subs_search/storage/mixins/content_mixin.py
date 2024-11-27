@@ -10,12 +10,13 @@ import typing
 from typing import Any, Callable, ClassVar, Iterator
 
 from .files_mixin import FilesMixin
+from .flags_mixin import FlagsMixin
 from .metadata_mixin import MetadataMixin
 
 _logger = logging.getLogger(__name__)
 
 
-class BaseItem(MetadataMixin, FilesMixin):
+class BaseItem(FlagsMixin, MetadataMixin, FilesMixin):
     item_type: ClassVar[str] = "base"
 
     def __init__(self, *, path: pathlib.Path) -> None:
@@ -63,8 +64,6 @@ class SubtitleItem(BaseItem):
     def lang(self) -> str:
         return self.metadata["lang"]
 
-    # FIXME: original/translation
-
     @property
     def subtitle_file(self) -> str:
         return self.metadata["subtitle_file"]
@@ -86,10 +85,6 @@ class AudioItem(BaseItem):
         return self.metadata["source"]
 
     @property
-    def lang(self) -> str:
-        return self.metadata["lang"]
-
-    @property
     def audio_file(self) -> str:
         return self.metadata["audio_file"]
 
@@ -98,8 +93,8 @@ class AudioItem(BaseItem):
         return self.files_path / self.audio_file
 
     @classmethod
-    def build_metadata(cls, *, source: str, lang: str, audio_file: str, **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"source": source, "lang": lang, "audio_file": audio_file}
+    def build_metadata(cls, *, source: str, audio_file: str, **kwargs) -> dict[str, Any]:
+        return super().build_metadata(**kwargs) | {"source": source, "audio_file": audio_file}
 
 
 ContentItemType = SubtitleItem | AudioItem

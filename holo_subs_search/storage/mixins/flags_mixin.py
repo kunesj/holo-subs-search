@@ -31,6 +31,10 @@ class Flags:
     # content is accessible only by signed in accounts with confirmed age
     YOUTUBE_AGE_RESTRICTED = "youtube-age-restricted"
 
+    # flags of SubtitleItem objects
+    SUBTITLE_TRANSCRIPTION = "transcription"
+    SUBTITLE_TRANSLATION = "translation"
+
     @classmethod
     def from_yt_dlp_error(cls, e: Exception) -> str | None:
         if not isinstance(e, yt_dlp.utils.DownloadError):
@@ -59,4 +63,4 @@ class FlagsMixin(MetadataMixin, abc.ABC):
 
     @classmethod
     def build_metadata(cls, *, flags: set[str] | None = None, **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"flags": set() if flags is None else set()}
+        return super().build_metadata(**kwargs) | {"flags": set() if flags is None else set(flags)}

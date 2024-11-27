@@ -143,7 +143,7 @@ def main() -> None:
         default=None,
         help="Eg. `chrome`, see yt-dlp docs for more options",
     )
-    # ---- YouTube: fetch subtitles ----
+    # ---- YouTube: fetch content ----
     parser.add_argument(
         "--youtube-fetch-subtitles",
         action="store_true",
@@ -154,6 +154,10 @@ def main() -> None:
         type=str,
         default=["en"],
         help="`--youtube-fetch-subtitles-langs en jp id`",
+    )
+    parser.add_argument(
+        "--youtube-fetch-audio",
+        action="store_true",
     )
     # ---- search subtitles ----
     parser.add_argument(
@@ -176,7 +180,7 @@ def main() -> None:
         nargs="+",
         type=str,
         default=["en"],
-        help="`--search-langs en jp id`",
+        help="`--search-langs en ja jp id`",
     )
     args = parser.parse_args()
 
@@ -231,12 +235,14 @@ def main() -> None:
                 continue
             VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
 
-    # fetching subtitles
+    # fetching content
 
-    if args.youtube_fetch_subtitles:
-        _logger.info("Fetching YouTube subtitles...")
+    if args.youtube_fetch_subtitles or args.youtube_fetch_audio:
+        _logger.info("Fetching YouTube content...")
 
         for video in storage.list_videos(lambda x: x.youtube_id):
+            # check if video can be accessed
+
             # FIXME: a way to refetch private/unavailable/memberships
             if Flags.YOUTUBE_PRIVATE in video.flags:
                 continue
@@ -250,16 +256,35 @@ def main() -> None:
                 if not channel.exists() or channel.youtube_id not in args.youtube_memberships:
                     continue  # not accessible membership video
 
-            fetch_langs = set(args.youtube_fetch_subtitles_langs) - set(video.youtube_subtitles.keys())
-            for item in video.list_content(
-                lambda x: x.item_type == "subtitle" and x.source == "youtube" and x.lang in fetch_langs
-            ):
-                fetch_langs -= {item.lang}
+            # calculate what subtitles to download
 
-            if not fetch_langs:
-                continue  # no langs to fetch
+            download_subtitles = None
+            if args.youtube_fetch_subtitles:
+                fetch_langs = set(args.youtube_fetch_subtitles_langs) - set(video.youtube_subtitles.keys())
+                for item in video.list_content(
+                    lambda x: x.item_type == "subtitle" and x.source == "youtube" and x.lang in fetch_langs
+                ):
+                    fetch_langs -= {item.lang}
 
-            video.fetch_youtube_subtitles(list(fetch_langs), cookies_from_browser=args.youtube_cookies_from_browser)
+                if fetch_langs:
+                    download_subtitles = list(fetch_langs)
+
+            # calculate if audio should be downloaded
+
+            download_audio = False
+            if args.youtube_fetch_audio:
+                download_audio = (
+                    len([*video.list_content(lambda x: x.item_type == "audio" and x.source == "youtube")]) == 0
+                )
+
+            # download data
+
+            if download_subtitles or download_audio:
+                video.fetch_youtube(
+                    download_subtitles=download_subtitles,
+                    download_audio=download_audio,
+                    cookies_from_browser=args.youtube_cookies_from_browser,
+                )
 
         for video in storage.list_videos(lambda x: x.youtube_id):
             video.update_gitignore()

@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
-from .. import ydl_tools
+from .. import whisper_tools, ydl_tools
 from ..utils import AwareDateTime, json_dumps
-from .mixins.content_mixin import ContentMixin, SubtitleItem
+from .mixins.content_mixin import AudioItem, ContentMixin, SubtitleItem
 from .mixins.flags_mixin import Flags, FlagsMixin
 from .mixins.holodex_mixin import HolodexMixin
 from .record import Record
@@ -133,15 +133,19 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     # Youtube
 
-    def fetch_youtube_subtitles(self, langs: list[str], cookies_from_browser: str | None = None) -> None:
+    def fetch_youtube(
+        self,
+        download_subtitles: list[str] | None = None,
+        download_audio: bool = False,
+        cookies_from_browser: str | None = None,
+    ) -> None:
         _logger.info("Fetching Youtube subtitles for video %s - %s", self.id, self.published_at)
 
-        # fetch info.json and subtitles
-
         try:
-            for yt_id, name, file_path in ydl_tools.download_video_info_and_subtitles(
-                video_ids=[self.youtube_id],
-                langs=langs,
+            for name, file_path in ydl_tools.download_video(
+                video_id=self.youtube_id,
+                download_subtitles=download_subtitles,
+                download_audio=download_audio,
                 cookies_from_browser=cookies_from_browser,
             ):
                 if name == "info.json":
@@ -155,16 +159,39 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                             self.youtube_info = info
 
+                elif any(name.endswith(f".{x}") for x in whisper_tools.WHISPER_AUDIO_FORMATS):
+                    with open(file_path, "rb") as f:
+                        content_id = f"youtube.audio.{name}/".replace(".", "-")
+                        item = AudioItem(path=self.content_path / content_id)
+
+                        metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
+                        item.create(metadata)
+                        item.audio_path.write_bytes(f.read())
+
                 elif name.endswith(".srt"):
                     with open(file_path, "r") as f:
-                        content_id = f"youtube.{name}/".replace(".", "-")  # youtube.en.srt
+                        content_id = f"youtube.subtitle.{name}/".replace(".", "-")  # youtube.en.srt
                         item = SubtitleItem(path=self.content_path / content_id)
+                        flags = set()
+
+                        sub_type, lang, _ = name.split(".", maxsplit=2)
+
+                        if sub_type == ydl_tools.PROPER_SUBS:
+                            pass
+                        elif sub_type == ydl_tools.TRANSCRIPTION_SUBS:
+                            flags.add(Flags.SUBTITLE_TRANSCRIPTION)
+                        elif sub_type == ydl_tools.TRANSLATION_SUBS:
+                            flags.add(Flags.SUBTITLE_TRANSLATION)
+                        else:
+                            raise ValueError("Unexpected subtitle type", sub_type)
 
                         metadata = SubtitleItem.build_metadata(
                             source="youtube",
-                            lang=name.split(".")[0],
+                            lang=lang,
+                            flags=flags,
                             subtitle_file=name,
                         )
+
                         item.create(metadata)
                         item.subtitle_path.write_text(f.read())
 
@@ -190,7 +217,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 raise
 
         else:
-            self._fetch_youtube_subtitles__skip_missing(langs)
+            if download_subtitles:
+                self._fetch_youtube_subtitles__skip_missing(download_subtitles)
 
     def _fetch_youtube_subtitles__skip_missing(self, langs: list[str], days: int = 7) -> None:
         """

@@ -2,43 +2,78 @@
 
 import logging
 import os
+import pathlib
 import tempfile
 import time
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator
 
 import yt_dlp
 
 _logger = logging.getLogger(__name__)
 
+# */*/*/* - audio formats supported by Whisper; free formats first
+# [asr>=16000] - Whisper audio is resampled to 16kHz, so we want files that have higher or equal sampling frequency
+# [vcodec=none] - only audio files
+# +size - order by size from smallest file first
+AUDIO_FORMAT = "(flac/m4a/ogg/wav/webm/mp3/mp4/mpeg/mpga)[asr>=16000][vcodec=none]"
+AUDIO_FORMAT_SORT = ["+size"]
+
+PROPER_SUBS = "proper"
+TRANSCRIPTION_SUBS = "transcription"
+TRANSLATION_SUBS = "translation"
+
 
 def get_video_params(
-    download_path: str, langs: list[str], cookies_from_browser: str | None = None, rate_limit_count: int = 0
+    *,
+    download_path: str,
+    download_subtitles: list[str] | None = None,
+    download_audio: bool = False,
+    automatic_subtitles: bool = False,
+    cookies_from_browser: str | None = None,
+    rate_limit_count: int = 0,
 ) -> dict[str, Any]:
     params = {
         "skip_download": True,
         "cookiesfrombrowser": (cookies_from_browser,) if cookies_from_browser else None,
-        # download automatic subtitles and convert them to SRT format
-        "writeautomaticsub": True,
-        "writesubtitles": True,
-        "subtitleslangs": langs,
-        "postprocessors": [{"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"}],
         # download info.json
         "writeinfojson": True,
         "clean_infojson": True,
         # save paths and names
-        "paths": {
-            "subtitle": download_path,
-            "infojson": download_path,
-        },
+        "paths": {"home": download_path},
         "outtmpl": {
             # Used by temp files, I have stripped it to just ID to fix the "File name too long" error
-            "default": "%(id)s.%(ext)s",
+            # Also used for audio and video files
+            "default": "%(id)s.%(format_id)s.%(ext)s",
             # ID.en.srt
             "subtitle": "%(id)s.%(ext)s",
             # ID.info.json
             "infojson": "%(id)s",
         },
     }
+
+    # download automatic subtitles and convert them to SRT format
+    if download_subtitles:
+        params |= {
+            "writeautomaticsub": automatic_subtitles,
+            "writesubtitles": True,
+            "subtitleslangs": [f"{x}.*" for x in download_subtitles] if automatic_subtitles else download_subtitles,
+            "postprocessors": [{"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"}],
+            # Skip translated subtitles (e.g. `en-jp`)
+            # - The "main" subtitles (e.g. `en`) will still be included even if they are translations
+            # - This should result in at most 2 subtitles per language: `en` and `en-orig` for `en.*`
+            # - Relevant only if automatic_subtitles=True, otherwise translation should not be downloaded anyway
+            # - See https://github.com/yt-dlp/yt-dlp/issues/9371#issuecomment-1978991249 for more info
+            "extractor_args": {"youtube": {"skip": ["translated_subs"]}},
+        }
+
+    # download smallest usable audio
+    if download_audio:
+        params |= {
+            "skip_download": False,
+            "extractaudio": True,
+            "format": AUDIO_FORMAT,
+            "format_sort": AUDIO_FORMAT_SORT,
+        }
 
     # Anonymous requests don't get HTTP 429 errors as easily, so we don't have to wait with them by default
     if cookies_from_browser or rate_limit_count > 0:
@@ -54,27 +89,107 @@ def get_video_params(
     return params
 
 
-def download_video_info_and_subtitles(
-    video_ids: Sequence[str], langs: list[str], cookies_from_browser: str | None = None
-) -> Iterator[tuple[str, str, str]]:
+def download_video(
+    *,
+    video_id: str,
+    download_subtitles: list[str] | None = None,
+    download_audio: bool = False,
+    cookies_from_browser: str | None = None,
+) -> Iterator[tuple[str, str]]:
+    """
+    Examples of returned filenames:
+        info.json
+        proper.en.srt
+        transcription.en.srt
+        translation.en.srt
+        f123.m4a
+    """
+    download_subtitles = download_subtitles or []
+    done_subtitles: dict[str, tuple[str, pathlib.Path]] = {}
+
     with tempfile.TemporaryDirectory() as tmpdir:
-        # download all new files
+        # download everything
 
         rate_limit_count = 0
         max_rate_limit_count = 5
         while True:
             try:
+                # download audio and proper subtitles
+
+                missing_subtitles = set(download_subtitles) - set(done_subtitles.keys())
                 with yt_dlp.YoutubeDL(
                     params=get_video_params(
                         download_path=tmpdir,
-                        langs=langs,
+                        download_subtitles=[*missing_subtitles],
+                        download_audio=download_audio,
+                        automatic_subtitles=False,
                         cookies_from_browser=cookies_from_browser,
                         rate_limit_count=rate_limit_count,
                     )
                 ) as ydl:
-                    error_code = ydl.download([f"https://www.youtube.com/watch?v={id_}" for id_ in video_ids])
+                    error_code = ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
                     if error_code != 0:
                         raise Exception("yt-dlp download failed!")
+
+                # rename proper subtitles into "proper.LANG.srt" format and get list of missing subtitles
+
+                with os.scandir(tmpdir) as it:
+                    for entry in it:
+                        if entry.is_file() and entry.name.endswith(".srt") and entry.name.count(".") == 2:
+                            path = pathlib.Path(tmpdir, entry.name)
+                            video_id, lang, ext = entry.name.split(".")
+
+                            sub_type = PROPER_SUBS
+                            new_path = pathlib.Path(tmpdir, ".".join([video_id, sub_type, lang, ext]))
+
+                            path.rename(new_path)
+                            done_subtitles[lang] = (sub_type, new_path)
+
+                # download automatic subtitles
+
+                if missing_subtitles := (set(download_subtitles) - set(done_subtitles.keys())):
+                    with yt_dlp.YoutubeDL(
+                        params=get_video_params(
+                            download_path=tmpdir,
+                            download_subtitles=[*missing_subtitles],
+                            download_audio=False,
+                            automatic_subtitles=True,
+                            cookies_from_browser=cookies_from_browser,
+                            rate_limit_count=rate_limit_count,
+                        )
+                    ) as ydl:
+                        error_code = ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                        if error_code != 0:
+                            raise Exception("yt-dlp download failed!")
+
+                # rename automatic subtitles to "transcription.LANG.srt" or "translation.LANG.srt"
+                # - keeps only the better one of them
+
+                with os.scandir(tmpdir) as it:
+                    for entry in it:
+                        if entry.is_file() and entry.name.endswith(".srt") and entry.name.count(".") == 2:
+                            path = pathlib.Path(tmpdir, entry.name)
+                            video_id, lang, ext = entry.name.split(".")
+
+                            if lang.endswith("-orig"):
+                                sub_type = TRANSCRIPTION_SUBS
+                                lang = lang[:-5]
+                            else:
+                                sub_type = TRANSLATION_SUBS
+                            new_path = pathlib.Path(tmpdir, ".".join([video_id, sub_type, lang, ext]))
+
+                            if lang in done_subtitles:
+                                if done_subtitles[lang][0] in (PROPER_SUBS, TRANSCRIPTION_SUBS):
+                                    # better subs are already available
+                                    path.unlink()
+                                    continue
+                                else:
+                                    # worse subs are available
+                                    done_subtitles[lang][1].unlink()
+                                    del done_subtitles[lang]
+
+                            path.rename(new_path)
+                            done_subtitles[lang] = (sub_type, new_path)
 
             except yt_dlp.utils.DownloadError as e:
                 if "HTTP Error 429" in e.msg and rate_limit_count < max_rate_limit_count:
@@ -94,4 +209,4 @@ def download_video_info_and_subtitles(
                 if not entry.is_file():
                     continue
                 video_id, name = entry.name.split(".", maxsplit=1)
-                yield video_id, name, entry.path
+                yield name, entry.path
