@@ -245,7 +245,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                     missing_langs,
                     self.id,
                 )
-                self.youtube_subtitles |= {lang: "missing" for lang in missing_langs}
+                self.youtube_subtitles = dict(self.youtube_subtitles) | {lang: "missing" for lang in missing_langs}
 
 
 # Following imports must be at the end of file to prevent cyclic import error
