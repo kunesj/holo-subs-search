@@ -93,6 +93,39 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     # Methods
 
+    def save_json_file(self, name: str, value: dict[str, Any] | None) -> None:
+        super().save_json_file(name, value)
+
+        if name in (self.HOLODEX_JSON, self.YOUTUBE_JSON):
+            flags = {*self.flags}
+
+            # Membership
+            # - IMPORTANT: Holodex membership value might be wrong! youtube_info must have priority.
+
+            if self.holodex_info and (topic_id := self.holodex_info.get("topic_id")):
+                if topic_id == "membersonly":
+                    flags |= {Flags.YOUTUBE_MEMBERSHIP}
+                else:
+                    flags -= {Flags.YOUTUBE_MEMBERSHIP}
+
+            if self.youtube_info and (availability := self.youtube_info.get("availability")):
+                if availability == "subscriber_only":
+                    flags |= {Flags.YOUTUBE_MEMBERSHIP}
+                else:
+                    flags -= {Flags.YOUTUBE_MEMBERSHIP}
+
+            # Age restriction
+
+            if self.youtube_info:
+                if self.youtube_info.get("age_limit", 0) > 0:
+                    flags |= {Flags.YOUTUBE_AGE_RESTRICTED}
+                elif self.youtube_info.get("availability") == "needs_auth":
+                    flags |= {Flags.YOUTUBE_AGE_RESTRICTED}
+                else:
+                    flags -= {Flags.YOUTUBE_AGE_RESTRICTED}  # probably age restricted
+
+            self.flags = flags
+
     @classmethod
     def build_metadata(cls, *, channel_id: str | None = None, **kwargs) -> dict[str, Any]:
         if not channel_id:
