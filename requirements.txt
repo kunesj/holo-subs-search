@@ -1,4 +1,4 @@
-yt-dlp>=2024.11.4
+yt-dlp>=2024.11.18
 srt==3.5.*
 holodex==0.11.11
 termcolor==2.5.0
