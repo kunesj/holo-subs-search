@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Self
 
@@ -279,6 +280,68 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                     self.id,
                 )
                 self.youtube_subtitles = dict(self.youtube_subtitles) | {lang: "missing" for lang in missing_langs}
+
+    # Whisper
+
+    def whisper_transcribe_audio(
+        self,
+        *,
+        api_base_url: str,
+        api_key: str,
+        model_size: whisper_tools.ModelSize | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        _logger.info("Transcribing audio for video %s - %s", self.id, self.published_at)
+
+        for audio_item in self.list_content(lambda x: x.item_type == "audio"):
+            # get whisper model
+
+            if model_name:
+                model = model_name
+            elif model_size:
+                model = whisper_tools.model_size_and_audio_lang_to_model(model_size=model_size)
+            else:
+                raise ValueError("model_name or model_size must be set!")
+
+            # transcribe the audio into SRT format
+
+            _logger.info("Starting transcription of %r using model %r", audio_item.audio_file, model)
+
+            start_time = time.time()
+            content = whisper_tools.audio_to_srt_subtitles(
+                path=audio_item.audio_path,
+                api_base_url=api_base_url,
+                api_key=api_key,
+                model=model,
+            )
+            end_time = time.time()
+
+            _logger.info("Transcription finished in %i seconds", end_time - start_time)
+
+            # save/replace subtitle file
+
+            for sub_item in self.list_content(lambda x: x.item_type == "subtitle" and x.source == "whisper"):
+                sub_item.path.unlink()
+
+            lang = "en"  # FIXME
+
+            subtitle_file = f"transcription.{lang}.srt"
+            content_id = f"whisper.subtitle.{subtitle_file}/".replace(".", "-")
+            item = SubtitleItem(path=self.content_path / content_id)
+
+            metadata = SubtitleItem.build_metadata(
+                source="whisper",
+                lang=lang,
+                flags={Flags.SUBTITLE_TRANSCRIPTION},
+                subtitle_file=subtitle_file,
+                whisper={
+                    "model": model,
+                    "audio": audio_item.audio_file,
+                },
+            )
+
+            item.create(metadata)
+            item.subtitle_path.write_text(content)
 
 
 # Following imports must be at the end of file to prevent cyclic import error

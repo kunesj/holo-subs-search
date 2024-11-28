@@ -130,7 +130,7 @@ def main() -> None:
         action="store_true",
         help="If already stored Holodex/Youtube/... info should be updated",
     )
-    # ---- YouTube: membership ----
+    # ---- YouTube ----
     parser.add_argument(
         "--youtube-memberships",
         nargs="+",
@@ -143,7 +143,6 @@ def main() -> None:
         default=None,
         help="Eg. `chrome`, see yt-dlp docs for more options",
     )
-    # ---- YouTube: fetch content ----
     parser.add_argument(
         "--youtube-fetch-subtitles",
         action="store_true",
@@ -158,6 +157,35 @@ def main() -> None:
     parser.add_argument(
         "--youtube-fetch-audio",
         action="store_true",
+    )
+    # ---- Whisper ----
+    parser.add_argument(
+        "--whisper-transcribe-audio",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--whisper-api-key",
+        default="placeholder",  # can be empty/placeholder for local api
+    )
+    parser.add_argument(
+        "--whisper-api-base-url",
+        default="http://localhost:8000/v1/",
+        help="Url of OpenAI-compatible API with whisper support.",
+    )
+    parser.add_argument(
+        "--whisper-model-size",
+        default=None,
+        choices=["tiny", "base", "small", "medium", "large"],
+        help="Size of Whisper model to load. See https://pypi.org/project/openai-whisper/ for more info.",
+    )
+    parser.add_argument(
+        "--whisper-model-name",
+        default=None,
+        help=(
+            "Name of specific Whisper model to load. "
+            "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API. "
+            "Can't be combined together with --whisper-model-size."
+        ),
     )
     # ---- search subtitles ----
     parser.add_argument(
@@ -233,7 +261,8 @@ def main() -> None:
         for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
             if value.status in ("new", "upcoming", "live"):
                 continue
-            VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
+            video = VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
+            video.update_gitignore()
 
     # fetching content
 
@@ -288,6 +317,23 @@ def main() -> None:
 
         for video in storage.list_videos(lambda x: x.youtube_id):
             video.update_gitignore()
+
+    # transcribe audio with whisper
+
+    if args.whisper_transcribe_audio:
+        _logger.info("Fetching and transcribing audio into subtitles with Whisper...")
+
+        for video in storage.list_videos():
+            whisper_subtitles = list(video.list_content(lambda x: x.item_type == "subtitle" and x.source == "whisper"))
+            if whisper_subtitles:
+                continue
+
+            video.whisper_transcribe_audio(
+                api_base_url=args.whisper_api_base_url,
+                api_key=args.whisper_api_key,
+                model_size=args.whisper_model_size,
+                model_name=args.whisper_model_name,
+            )
 
     # searching parsed subtitles
 

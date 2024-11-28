@@ -72,9 +72,24 @@ class SubtitleItem(BaseItem):
     def subtitle_path(self) -> pathlib.Path:
         return self.files_path / self.subtitle_file
 
+    @property
+    def whisper(self) -> dict[str, Any] | None:
+        return self.metadata.get("whisper", None)
+
+    @whisper.setter
+    def whisper(self, value: dict[str, Any] | None) -> None:
+        self.metadata = dict(self.metadata, whisper=value)
+
     @classmethod
-    def build_metadata(cls, *, source: str, lang: str, subtitle_file: str, **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"source": source, "lang": lang, "subtitle_file": subtitle_file}
+    def build_metadata(
+        cls, *, source: str, lang: str, subtitle_file: str, whisper: dict[str, Any] | None = None, **kwargs
+    ) -> dict[str, Any]:
+        return super().build_metadata(**kwargs) | {
+            "source": source,
+            "lang": lang,
+            "subtitle_file": subtitle_file,
+            "whisper": whisper,
+        }
 
 
 class AudioItem(BaseItem):
