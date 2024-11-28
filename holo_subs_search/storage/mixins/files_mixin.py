@@ -72,10 +72,8 @@ class FilesMixin(abc.ABC):
 
         if value is None:
             value_text = value
-        elif isinstance(value, (dict, list)):
-            value_text = json_dumps(value)
         else:
-            raise TypeError(value)
+            value_text = json_dumps(value)
 
         self.save_text_file(name, value_text)
 

@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import json
+from types import MappingProxyType
 from typing import Annotated, Any, AsyncIterator, Iterator, TypeVar
 
 import annotated_types
@@ -38,8 +39,10 @@ def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
 def _json_dumps_default(obj: Any) -> Any:
     if isinstance(obj, (set, tuple)):
         return [*obj]
+    elif isinstance(obj, MappingProxyType):
+        return {**obj}
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 
 def json_dumps(obj) -> str:
-    return json.dumps(obj, default=_json_dumps_default)
+    return json.dumps(obj, default=_json_dumps_default, sort_keys=True)
