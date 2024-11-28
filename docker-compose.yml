@@ -1,0 +1,71 @@
+services:
+  faster-whisper-server-cuda:
+    image: fedirz/faster-whisper-server:latest-cuda
+    restart: unless-stopped
+    ports:
+      - 8000:8000
+    volumes:
+      - hugging_face_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              #device_ids: ['0']
+              count: all
+              capabilities: [gpu]
+
+  faster-whisper-server-cpu:
+    image: fedirz/faster-whisper-server:latest-cpu
+    restart: unless-stopped
+    ports:
+      - 8000:8000
+    volumes:
+      - hugging_face_cache:/root/.cache/huggingface
+
+  pyannote-server-cuda:
+    image: local/pyannote-server:latest-cuda
+    build:
+      context: .
+      dockerfile: .docker-pyannote-server/Dockerfile
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - 8001:8001
+    volumes:
+      - hugging_face_cache:/root/.cache/huggingface
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://0.0.0.0:8001/healthcheck" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              #device_ids: ['0']
+              count: all
+              capabilities: [gpu]
+
+  pyannote-server-cpu:
+    image: local/pyannote-server:latest-cpu
+    build:
+      context: .
+      dockerfile: .docker-pyannote-server/Dockerfile
+      args:
+        - TORCH_CPU=1
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - 8001:8001
+    volumes:
+      - hugging_face_cache:/root/.cache/huggingface
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://0.0.0.0:8001/healthcheck" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  hugging_face_cache:

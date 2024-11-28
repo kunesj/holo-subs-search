@@ -2,7 +2,10 @@
 
 Tool for searching transcriptions of vtuber videos.
 
-Uses data from [Holodex](https://holodex.net), subtitles and audio from Youtube, and [Whisper](https://github.com/fedirz/faster-whisper-server) for directly converting YouTube audio into subtitles.
+Uses:
+- Metadata from [Holodex](https://holodex.net)
+- Subtitles and audio from Youtube
+- [Whisper](https://github.com/fedirz/faster-whisper-server) for transcription
 
 ![example.png](./example.png)
 
@@ -63,23 +66,27 @@ Uses data from [Holodex](https://holodex.net), subtitles and audio from Youtube,
 
 Some videos completely lack subtitles or the subtitles are VERY bad. In this case, you can try to download the audio and transcribe it yourself. The results can be better or worse depending on a lot of variables.
 
+Most of these steps assume that you have Docker with support for Nvidia GPU installed, and a relatively powerful/new Nvidia GPU (like RTX 3090). 
+Everything should also be able to run on CPU, but you would have use the `*-cpu` containers, and it would be a lot slower.
 
-- Download all audio files
+### Download all audio files
+
+```bash
+python3.11 -m holo_subs_search --youtube-fetch-audio
+```
 
     ```bash
     python3.11 -m holo_subs_search --youtube-fetch-audio
     ```
 
 
+### Transcribe Audio
+
 - Start `Whisper` server
 
     ```bash
-    docker compose --file whisper.docker-compose.yml up
+    docker compose up faster-whisper-server-cuda
     ```
-
-    Default settings requires Docker with GPU support and a relatively powerful Nvidia GPU. 
-    
-    For example: Transcription of 3.5 hours long video took 2 minutes with `tiny` model on `Nvidia RTX 3090`.
     
     Alternatively, you should be able to use the Whisper from official OpenAI API with `--whisper-api-base-url`, `--whisper-api-key` and `--whisper-model-name` parameters.
 
@@ -89,6 +96,8 @@ Some videos completely lack subtitles or the subtitles are VERY bad. In this cas
     ```bash
     python3.11 -m holo_subs_search --whisper-transcribe-audio --whisper-model-size tiny
     ```
+
+    For example, transcription of 3.5 hours long video took 2 minutes with `tiny` model on `Nvidia RTX 3090`.
 
 
 - Search transcribed audio
