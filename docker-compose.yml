@@ -34,11 +34,6 @@ services:
       - 8001:8001
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://0.0.0.0:8001/healthcheck" ]
-      interval: 10s
-      timeout: 5s
-      retries: 20
     deploy:
       resources:
         reservations:
@@ -61,11 +56,6 @@ services:
       - 8001:8001
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://0.0.0.0:8001/healthcheck" ]
-      interval: 10s
-      timeout: 5s
-      retries: 20
 
 volumes:
   hugging_face_cache:
