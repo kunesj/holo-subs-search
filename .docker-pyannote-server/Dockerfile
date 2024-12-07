@@ -21,7 +21,6 @@ COPY .docker-pyannote-server/requirements.cuda.txt /root/requirements.cuda.txt
 
 RUN if [ "$TORCH_CPU" = "1" ]; then \
         pip install --no-cache-dir --upgrade -r /root/requirements.cpu.txt; \
-        echo "1" > /root/TORCH_CPU; \
     else \
         pip install --no-cache-dir --upgrade -r /root/requirements.cuda.txt; \
     fi

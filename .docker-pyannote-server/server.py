@@ -2,8 +2,6 @@
 
 import io
 import logging
-import os
-import pathlib
 from typing import Annotated, Any
 
 import pyannote.audio
@@ -16,48 +14,11 @@ _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 PIPELINE_CACHE: dict[str, Any] = {"pipeline": None, "model": None}
-TORCH_CPU_PATH = pathlib.Path(os.path.dirname(os.path.realpath(__file__)), "./TORCH_CPU")
-TORCH_CPU = bool(int(TORCH_CPU_PATH.read_text() if TORCH_CPU_PATH.exists() else "0"))
-_logger.info("TORCH_CPU=%s", TORCH_CPU)
-
-app = FastAPI()
+TORCH_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_logger.info("TORCH_DEVICE: %s", TORCH_DEVICE)
 
 
-@app.get("/healthcheck")
-def healthcheck() -> Response:
-    return Response(status_code=200)
-
-
-class Track(TypedDict):
-    start: float
-    end: float
-    speaker: str
-
-
-class DiarizationResponse(TypedDict):
-    tracks: list[Track]
-
-
-@app.post("/diarization")
-async def diarization(
-    file: UploadFile,
-    model: Annotated[str, Query()] = "pyannote/speaker-diarization-3.1",
-    huggingface_token: Annotated[str | None, Query()] = None,
-) -> DiarizationResponse:
-    """
-    To use the default model:
-    - Accept https://hf.co/pyannote/segmentation-3.0 user conditions
-    - Accept https://hf.co/pyannote/speaker-diarization-3.1 user conditions
-    - Create access token at https://hf.co/settings/tokens and use it when calling this endpoint
-
-    Supports all audio formats that are supported by `pydub`, but using `wav` will be faster,
-    because the file will not have to be converted into it.
-
-    Probably doesn't handle switching between models or concurrent requests very well.
-    """
-
-    # get/load model pipeline
-
+def load_pipeline(model: str, huggingface_token: str | None) -> pyannote.audio.Pipeline:
     if model == PIPELINE_CACHE["model"]:
         _logger.info("Using cached model pipeline: %s", model)
         pipeline = PIPELINE_CACHE["pipeline"]
@@ -82,15 +43,16 @@ async def diarization(
                 ),
             )
 
-        if not TORCH_CPU:
-            _logger.info("Moving model to GPU")
-            pipeline.to(torch.device("cuda"))
+        _logger.info("Moving model to: %s", TORCH_DEVICE)
+        pipeline.to(TORCH_DEVICE)
 
         PIPELINE_CACHE["pipeline"] = pipeline
         PIPELINE_CACHE["model"] = model
 
-    # convert file to wav stream
+    return pipeline
 
+
+async def file_to_wav_stream(file: UploadFile) -> io.BytesIO:
     file_stream = io.BytesIO(await file.read())
 
     if file.filename.endswith(".wav"):
@@ -103,11 +65,48 @@ async def diarization(
         sound.export(wav_stream, format="wav")
 
     wav_stream.seek(0)
+    return wav_stream
 
-    # process audio file
+
+class Track(TypedDict):
+    start: float
+    end: float
+    speaker: str
+
+
+class DiarizationResponse(TypedDict):
+    tracks: list[Track]
+
+
+app = FastAPI()
+
+
+@app.get("/healthcheck")
+def healthcheck() -> Response:
+    return Response(status_code=200)
+
+
+@app.post("/diarization")
+async def diarization(
+    file: UploadFile,
+    model: Annotated[str, Query()] = "pyannote/speaker-diarization-3.1",
+    huggingface_token: Annotated[str | None, Query()] = None,
+) -> DiarizationResponse:
+    """
+    To use the default model:
+    - Accept https://hf.co/pyannote/segmentation-3.0 user conditions
+    - Accept https://hf.co/pyannote/speaker-diarization-3.1 user conditions
+    - Create access token at https://hf.co/settings/tokens and use it when calling this endpoint
+
+    Supports all audio formats that are supported by `pydub`, but using `wav` will be faster,
+    because the file will not have to be converted into it.
+
+    Probably doesn't handle switching between models or concurrent requests very well.
+    """
+    pipeline = load_pipeline(model, huggingface_token)
+    wav_stream = file_to_wav_stream(file)
 
     _logger.info("Processing audio file...")
-
     return {
         "tracks": [
             {"start": turn.start, "end": turn.end, "speaker": speaker}
