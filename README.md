@@ -88,17 +88,18 @@ python3.11 -m holo_subs_search --youtube-fetch-audio
     docker compose up faster-whisper-server-cuda
     ```
     
-    Alternatively, you should be able to use the Whisper from official OpenAI API with `--whisper-api-base-url`, `--whisper-api-key` and `--whisper-model-name` parameters.
+    Alternatively, you should be able to use the Whisper from official OpenAI API with `--whisper-api-base-url`, `--whisper-api-key` and `--whisper-model` parameters.
 
 
 - Transcribe the audio files into subtitles
 
     ```bash
-    python3.11 -m holo_subs_search --whisper-transcribe-audio --whisper-model-size tiny
+    python3.11 -m holo_subs_search --whisper-transcribe-audio
     ```
 
-    For example, transcription of 3.5 hours long video took 2 minutes with `tiny` model on `Nvidia RTX 3090`.
-
+    For example, transcription of 3.5 hours long video on `Nvidia RTX 3090` took:
+    - 8 minutes with `nyrahealth/faster_CrisperWhisper` (default model)
+    - 2 minutes with `Systran/faster-whisper-tiny`
 
 - Search transcribed audio
 

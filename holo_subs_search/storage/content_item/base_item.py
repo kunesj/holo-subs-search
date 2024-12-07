@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 from typing import Any, Callable, ClassVar, TypeVar
 
 from ..mixins.files_mixin import FilesMixin
@@ -55,3 +56,13 @@ class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
     @classmethod
     def build_filter(cls: type[T], *parts: FilterPart) -> Callable[[T], bool]:
         return super().build_filter(FilterPart(name="item_type", operator="eq", value=cls.item_type), *parts)
+
+    @classmethod
+    def build_content_id(cls, *parts: Any) -> str:
+        if not parts:
+            raise ValueError("At least one content ID part is required")
+
+        parts = [str(x) for x in parts]
+        parts = [re.sub(r"[^a-zA-Z0-9\-]+", "-", x) for x in parts]
+
+        return "_".join(parts)

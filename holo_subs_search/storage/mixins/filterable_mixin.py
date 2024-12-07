@@ -24,7 +24,7 @@ class FilterableAttribute:
 
         if match := re.match(r"^Optional\[(.*)\]$", annotation):
             annotation = match.group(1).strip()
-        elif match := re.match(r"^(.*) | None$", annotation):
+        elif match := re.match(r"^(.*) \| None$", annotation):
             annotation = match.group(1).strip()
 
         if annotation in ("str",):

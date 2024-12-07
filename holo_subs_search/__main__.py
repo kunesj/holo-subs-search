@@ -10,8 +10,8 @@ from typing import Callable
 
 import termcolor
 
-from . import holodex_tools, sub_parser, sub_search
-from .storage import ChannelRecord, Flags, Storage, VideoRecord
+from . import holodex_tools, sub_parser, sub_search, whisper_tools
+from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
 from .storage.content_item import AudioItem, SubtitleItem
 
 _logger = logging.getLogger(__name__)
@@ -185,18 +185,11 @@ def main() -> None:
         help="Url of OpenAI-compatible API with whisper support.",
     )
     parser.add_argument(
-        "--whisper-model-size",
-        default=None,
-        choices=["tiny", "base", "small", "medium", "large"],
-        help="Size of Whisper model to load. See https://pypi.org/project/openai-whisper/ for more info.",
-    )
-    parser.add_argument(
-        "--whisper-model-name",
-        default=None,
+        "--whisper-model",
+        default=whisper_tools.CRISPER_WHISPER_MODEL,
         help=(
             "Name of specific Whisper model to load. "
-            "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API. "
-            "Can't be combined together with --whisper-model-size."
+            "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API."
         ),
     )
     # ---- search subtitles ----
@@ -334,15 +327,22 @@ def main() -> None:
         _logger.info("Fetching and transcribing audio into subtitles with Whisper...")
 
         for video in storage.list_videos(video_filter):
-            whisper_subtitles = list(video.list_content(SubtitleItem.build_str_filter("source:eq:whisper")))
+            whisper_subtitles = list(
+                video.list_content(
+                    SubtitleItem.build_filter(
+                        FilterPart(name="source", operator="eq", value="whisper"),
+                        FilterPart(name="whisper_model", operator="eq", value=args.whisper_model),
+                    )
+                )
+            )
             if whisper_subtitles:
+                # whisper subtitles for this model were already transcribed
                 continue
 
             video.whisper_transcribe_audio(
                 api_base_url=args.whisper_api_base_url,
                 api_key=args.whisper_api_key,
-                model_size=args.whisper_model_size,
-                model_name=args.whisper_model_name,
+                model=args.whisper_model,
             )
 
     # searching parsed subtitles

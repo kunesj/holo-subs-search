@@ -14,6 +14,7 @@ from .. import whisper_tools, ydl_tools
 from ..utils import AwareDateTime, json_dumps
 from .content_item import AudioItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
+from .mixins.filterable_mixin import FilterPart
 from .mixins.flags_mixin import Flags, FlagsMixin
 from .mixins.holodex_mixin import HolodexMixin
 from .record import Record
@@ -200,16 +201,16 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                 elif any(name.endswith(f".{x}") for x in whisper_tools.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
-                        content_id = f"youtube.audio.{name}/".replace(".", "-")
+                        content_id = AudioItem.build_content_id("youtube", "audio", name)
                         item = AudioItem(path=self.content_path / content_id)
 
                         metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
                         item.create(metadata)
                         item.audio_path.write_bytes(f.read())
 
-                elif name.endswith(".srt"):
+                elif name.endswith(".srt"):  # youtube.en.srt
                     with open(file_path, "r") as f:
-                        content_id = f"youtube.subtitle.{name}/".replace(".", "-")  # youtube.en.srt
+                        content_id = SubtitleItem.build_content_id("youtube", "subtitle", name)
                         item = SubtitleItem(path=self.content_path / content_id)
                         flags = set()
 
@@ -268,7 +269,10 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
         if is_old:
             stored_langs = {
-                item.lang for item in self.list_content(lambda x: x.item_type == "subtitle" and x.source == "youtube")
+                item.lang
+                for item in self.list_content(
+                    SubtitleItem.build_filter(FilterPart(name="source", operator="eq", value="youtube"))
+                )
             }
             missing_langs = {lang for lang in langs if lang not in stored_langs}
 
@@ -287,24 +291,18 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         *,
         api_base_url: str,
         api_key: str,
-        model_size: whisper_tools.ModelSize | None = None,
-        model_name: str | None = None,
+        model: str,
     ) -> None:
         _logger.info("Transcribing audio for video %s - %s", self.id, self.published_at)
 
-        for audio_item in self.list_content(lambda x: x.item_type == "audio"):
-            # get whisper model
-
-            if model_name:
-                model = model_name
-            elif model_size:
-                model = whisper_tools.model_size_and_audio_lang_to_model(model_size=model_size)
-            else:
-                raise ValueError("model_name or model_size must be set!")
+        for audio_item in self.list_content(AudioItem.build_filter()):
+            lang = "en"  # FIXME: detect audio language
 
             # transcribe the audio into SRT format
 
-            _logger.info("Starting transcription of %r using model %r", audio_item.audio_file, model)
+            _logger.info(
+                "Starting transcription of %r using model %r and language %r", audio_item.audio_file, model, lang
+            )
 
             start_time = time.time()
             content = whisper_tools.audio_to_srt_subtitles(
@@ -312,20 +310,26 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 api_base_url=api_base_url,
                 api_key=api_key,
                 model=model,
+                language=lang,
             )
             end_time = time.time()
 
             _logger.info("Transcription finished in %i seconds", end_time - start_time)
 
             # save/replace subtitle file
+            # - keeps transcriptions from different models and for different languages
 
-            for sub_item in self.list_content(lambda x: x.item_type == "subtitle" and x.source == "whisper"):
+            for sub_item in self.list_content(
+                SubtitleItem.build_filter(
+                    FilterPart(name="source", operator="eq", value="whisper"),
+                    FilterPart(name="lang", operator="eq", value=lang),
+                    FilterPart(name="whisper_model", operator="eq", value=model),
+                )
+            ):
                 sub_item.path.unlink()
 
-            lang = "en"  # FIXME
-
             subtitle_file = f"transcription.{lang}.srt"
-            content_id = f"whisper.subtitle.{subtitle_file}/".replace(".", "-")
+            content_id = SubtitleItem.build_content_id("whisper", model, "subtitle", subtitle_file)
             item = SubtitleItem(path=self.content_path / content_id)
 
             metadata = SubtitleItem.build_metadata(
@@ -333,10 +337,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 lang=lang,
                 flags={Flags.SUBTITLE_TRANSCRIPTION},
                 subtitle_file=subtitle_file,
-                whisper={
-                    "model": model,
-                    "audio": audio_item.audio_file,
-                },
+                whisper_audio=audio_item.audio_file,
+                whisper_model=model,
             )
 
             item.create(metadata)

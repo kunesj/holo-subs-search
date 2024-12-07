@@ -12,6 +12,8 @@ _logger = logging.getLogger(__name__)
 class SubtitleItem(BaseItem):
     item_type = "subtitle"
 
+    # Properties
+
     @property
     def source(self) -> str:
         return self.metadata["source"]
@@ -28,21 +30,41 @@ class SubtitleItem(BaseItem):
     def subtitle_path(self) -> pathlib.Path:
         return self.files_path / self.subtitle_file
 
-    @property
-    def whisper(self) -> dict[str, Any] | None:
-        return self.metadata.get("whisper", None)
+    # Transcription properties
 
-    @whisper.setter
-    def whisper(self, value: dict[str, Any] | None) -> None:  # FIXME: audio checksum
-        self.metadata = dict(self.metadata, whisper=value)
+    @property
+    def whisper_audio(self) -> str | None:
+        return self.metadata.get("whisper_audio", None)
+
+    @whisper_audio.setter
+    def whisper_audio(self, value: str | None) -> None:
+        self.metadata = dict(self.metadata, whisper_audio=value)
+
+    @property
+    def whisper_model(self) -> str | None:
+        return self.metadata.get("whisper_model", None)
+
+    @whisper_model.setter
+    def whisper_model(self, value: str | None) -> None:
+        self.metadata = dict(self.metadata, whisper_model=value)
+
+    # Methods
 
     @classmethod
     def build_metadata(
-        cls, *, source: str, lang: str, subtitle_file: str, whisper: dict[str, Any] | None = None, **kwargs
+        cls,
+        *,
+        source: str,
+        lang: str,
+        subtitle_file: str,
+        whisper_audio: str | None = None,
+        whisper_model: str | None = None,
+        **kwargs,
     ) -> dict[str, Any]:
         return super().build_metadata(**kwargs) | {
             "source": source,
             "lang": lang,
             "subtitle_file": subtitle_file,
-            "whisper": whisper,
+            "whisper_audio": whisper_audio,
+            "whisper_model": whisper_model,
         }

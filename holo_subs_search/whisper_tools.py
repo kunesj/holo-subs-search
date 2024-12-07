@@ -17,8 +17,21 @@ ModelSize = Literal["tiny", "small", "base", "medium", "large"]
 # Audio formats that are supported by Whisper
 WHISPER_AUDIO_FORMATS = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
 
+# Improved version of Whisper with:
+# - precise and verbatim speech recognition with accurate (crisp) word-level timestamps.
+# - Aims to transcribe every spoken word exactly as it is, including fillers, pauses, stutters and false starts.
+# - Lower chance of halucinations
+# - The version for the faster-whisper does not guarantee precision of word time stamps, but no other problems
+# - 3.09 GB
+# https://github.com/nyrahealth/CrisperWhisper
+# https://huggingface.co/nyrahealth/faster_CrisperWhisper
+CRISPER_WHISPER_MODEL = "nyrahealth/faster_CrisperWhisper"
+
 
 def model_size_and_audio_lang_to_model(model_size: ModelSize, audio_lang: str | None = None) -> str:
+    """
+    Base whisper has a lot of hallucinations, so don't use it just by itself.
+    """
     match model_size, audio_lang:
         case "tiny", "en":
             return "Systran/faster-whisper-tiny.en"
