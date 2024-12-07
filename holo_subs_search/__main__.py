@@ -11,7 +11,7 @@ import termcolor
 
 from . import holodex_tools, sub_parser, sub_search
 from .storage import ChannelRecord, Flags, Storage, VideoRecord
-from .storage.mixins.content_mixin import ContentItemType
+from .storage.content_item import ContentItemType
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))

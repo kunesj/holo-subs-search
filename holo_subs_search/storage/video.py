@@ -12,7 +12,8 @@ from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoI
 
 from .. import whisper_tools, ydl_tools
 from ..utils import AwareDateTime, json_dumps
-from .mixins.content_mixin import AudioItem, ContentMixin, SubtitleItem
+from .content_item import AudioItem, SubtitleItem
+from .mixins.content_mixin import ContentMixin
 from .mixins.flags_mixin import Flags, FlagsMixin
 from .mixins.holodex_mixin import HolodexMixin
 from .record import Record
