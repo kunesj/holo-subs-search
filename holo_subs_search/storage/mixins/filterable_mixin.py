@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import re
 from typing import Any, Callable, Literal, TypeVar
 
 T = TypeVar("T")
@@ -15,11 +16,20 @@ class FilterableAttribute:
 
     @property
     def operators(self) -> frozenset[FilterOperatorType]:
+        annotation = self.annotation
         ops = set()
 
-        if self.annotation in ("str", "str | None", "Optional[str]"):
+        if match := re.match(r"^ClassVar\[(.*)\]$", self.annotation):
+            annotation = match.group(1).strip()
+
+        if match := re.match(r"^Optional\[(.*)\]$", annotation):
+            annotation = match.group(1).strip()
+        elif match := re.match(r"^(.*) | None$", annotation):
+            annotation = match.group(1).strip()
+
+        if annotation in ("str",):
             ops |= {"eq", "ne"}
-        elif self.annotation in ("list[str]", "set[str]", "frozenset[str]"):
+        elif annotation in ("list[str]", "set[str]", "frozenset[str]"):
             ops |= {"includes", "excludes"}
 
         return frozenset(ops)
@@ -34,9 +44,9 @@ class FilterableAttribute:
             case "ne":
                 return lambda x: value != getattr(x, self.name)
             case "includes":
-                return lambda x: value in getattr(x, self.name)
+                return lambda x: value in (getattr(x, self.name) or [])
             case "excludes":
-                return lambda x: value not in getattr(x, self.name)
+                return lambda x: value not in (getattr(x, self.name) or [])
 
         raise ValueError("Unexpected operator", self, operator, value)
 

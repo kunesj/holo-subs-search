@@ -6,12 +6,13 @@ import logging
 import os
 import pathlib
 import time
+from typing import Callable
 
 import termcolor
 
 from . import holodex_tools, sub_parser, sub_search
 from .storage import ChannelRecord, Flags, Storage, VideoRecord
-from .storage.content_item import ContentItemType
+from .storage.content_item import AudioItem, SubtitleItem
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))
@@ -24,21 +25,15 @@ def _search_video_subtitles(
     *,
     regex: bool = False,
     video_filter: Callable[[VideoRecord], bool] | None = None,
-    filter_source: list[str] | None = None,
-    filter_lang: list[str] | None = None,
+    subtitle_filter: Callable[[SubtitleItem], bool] | None = None,
     time_before: int = 15,
     time_after: int = 15,
 ) -> None:
-    def _item_filter(x: ContentItemType) -> bool:
-        return (
-            x.item_type == "subtitle"
-            and (filter_source is None or x.source in filter_source)
-            and (filter_lang is None or x.lang in filter_lang)
-            and x.subtitle_file.endswith(".srt")
-        )
+    if not subtitle_filter:
+        subtitle_filter = SubtitleItem.build_str_filter()
 
     for video in storage.list_videos(video_filter):
-        for item in video.list_content(_item_filter):
+        for item in video.list_content(lambda x: subtitle_filter(x) and x.subtitle_file.endswith(".srt")):
             content = item.subtitle_path.read_text()
             parsed = sub_parser.SubFile(
                 timestamp=time.time(),
@@ -131,7 +126,7 @@ def main() -> None:
         action="store_true",
         help="If already stored Holodex/Youtube/... info should be updated",
     )
-    # ---- filters ----
+    # ---- record filters ----
     parser.add_argument(
         "--channel-filter",
         nargs="+",
@@ -214,18 +209,11 @@ def main() -> None:
         action="store_true",
     )
     parser.add_argument(
-        "--search-sources",
+        "--search-subtitle-filter",
         nargs="+",
         type=str,
-        default=[],
-        help="`--search-sources youtube foo bar`",
-    )
-    parser.add_argument(
-        "--search-langs",
-        nargs="+",
-        type=str,
-        default=["en"],
-        help="`--search-langs en ja jp id`",
+        default=["lang:eq:en"],
+        help="`--search-subtitle-filter source:eq:youtube lang:eq:en`",
     )
     args = parser.parse_args()
 
@@ -245,6 +233,7 @@ def main() -> None:
 
     channel_filter = ChannelRecord.build_str_filter(*args.channel_filter)
     video_filter = VideoRecord.build_str_filter(*args.video_filter)
+    search_subtitle_filter = SubtitleItem.build_str_filter(*args.search_subtitle_filter)
 
     # fetch/refresh channels
 
@@ -325,9 +314,7 @@ def main() -> None:
 
             download_audio = False
             if args.youtube_fetch_audio:
-                download_audio = (
-                    len([*video.list_content(lambda x: x.item_type == "audio" and x.source == "youtube")]) == 0
-                )
+                download_audio = len([*video.list_content(AudioItem.build_str_filter("source:eq:youtube"))]) == 0
 
             # download data
 
@@ -347,7 +334,7 @@ def main() -> None:
         _logger.info("Fetching and transcribing audio into subtitles with Whisper...")
 
         for video in storage.list_videos(video_filter):
-            whisper_subtitles = list(video.list_content(lambda x: x.item_type == "subtitle" and x.source == "whisper"))
+            whisper_subtitles = list(video.list_content(SubtitleItem.build_str_filter("source:eq:whisper")))
             if whisper_subtitles:
                 continue
 
@@ -367,8 +354,7 @@ def main() -> None:
             value=args.search,
             regex=args.search_regex,
             video_filter=video_filter,
-            filter_source=args.search_sources or None,
-            filter_lang=args.search_langs or None,
+            subtitle_filter=search_subtitle_filter,
         )
 
 

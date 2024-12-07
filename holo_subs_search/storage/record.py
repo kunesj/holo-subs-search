@@ -3,14 +3,16 @@ from __future__ import annotations
 import abc
 import logging
 import pathlib
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypeVar
 
 from .mixins.files_mixin import FilesMixin
-from .mixins.filterable_mixin import FilterableMixin
+from .mixins.filterable_mixin import FilterableMixin, FilterPart
 from .mixins.metadata_mixin import MetadataMixin
 
 if TYPE_CHECKING:
     from .storage import Storage
+
+T = TypeVar("T")
 
 _logger = logging.getLogger(__name__)
 
@@ -57,3 +59,7 @@ class Record(MetadataMixin, FilterableMixin, FilesMixin, abc.ABC):
         self.model_path.mkdir(parents=True, exist_ok=True)
         self.record_path.mkdir(parents=True, exist_ok=True)
         self.metadata = metadata
+
+    @classmethod
+    def build_filter(cls: type[T], *parts: FilterPart) -> Callable[[T], bool]:
+        return super().build_filter(FilterPart(name="model_name", operator="eq", value=cls.model_name), *parts)

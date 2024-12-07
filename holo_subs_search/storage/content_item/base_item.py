@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar, TypeVar
 
 from ..mixins.files_mixin import FilesMixin
-from ..mixins.filterable_mixin import FilterableMixin
+from ..mixins.filterable_mixin import FilterableMixin, FilterPart
 from ..mixins.flags_mixin import FlagsMixin
 from ..mixins.metadata_mixin import MetadataMixin
+
+T = TypeVar("T")
 
 _logger = logging.getLogger(__name__)
 
@@ -49,3 +51,7 @@ class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
     @classmethod
     def build_metadata(cls, **kwargs) -> dict[str, Any]:
         return super().build_metadata(**kwargs) | {"item_type": cls.item_type}
+
+    @classmethod
+    def build_filter(cls: type[T], *parts: FilterPart) -> Callable[[T], bool]:
+        return super().build_filter(FilterPart(name="item_type", operator="eq", value=cls.item_type), *parts)
