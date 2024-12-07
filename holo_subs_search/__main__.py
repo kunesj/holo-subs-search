@@ -23,6 +23,7 @@ def _search_video_subtitles(
     value: str,
     *,
     regex: bool = False,
+    video_filter: Callable[[VideoRecord], bool] | None = None,
     filter_source: list[str] | None = None,
     filter_lang: list[str] | None = None,
     time_before: int = 15,
@@ -36,7 +37,7 @@ def _search_video_subtitles(
             and x.subtitle_file.endswith(".srt")
         )
 
-    for video in storage.list_videos():
+    for video in storage.list_videos(video_filter):
         for item in video.list_content(_item_filter):
             content = item.subtitle_path.read_text()
             parsed = sub_parser.SubFile(
@@ -129,6 +130,22 @@ def main() -> None:
         "--update-stored",
         action="store_true",
         help="If already stored Holodex/Youtube/... info should be updated",
+    )
+    # ---- filters ----
+    parser.add_argument(
+        "--channel-filter",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--channel-filter id:eq:***** flags:excludes:****` Can be used to limit what channels are processed. "
+        "Used only when refreshing channels or video lists.",
+    )
+    parser.add_argument(
+        "--video-filter",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--video-filter id:eq:***** flags:excludes:****` Can be used to limit what videos are processed",
     )
     # ---- YouTube ----
     parser.add_argument(
@@ -224,12 +241,17 @@ def main() -> None:
     _logger.info("Storage: %s", storage_path)
     storage = Storage(path=storage_path)
 
+    # build filters
+
+    channel_filter = ChannelRecord.build_str_filter(*args.channel_filter)
+    video_filter = VideoRecord.build_str_filter(*args.video_filter)
+
     # fetch/refresh channels
 
     fetch_holodex_ids = set()
 
     if args.refresh_channels:
-        for channel in storage.list_channels():
+        for channel in storage.list_channels(channel_filter):
             if channel.holodex_id and Flags.HOLODEX_PRESERVE not in channel.flags and args.update_stored:
                 fetch_holodex_ids.add(channel.holodex_id)
 
@@ -255,7 +277,7 @@ def main() -> None:
 
         holodex_channel_ids = {
             channel.holodex_id
-            for channel in storage.list_channels()
+            for channel in storage.list_channels(channel_filter)
             if channel.holodex_id and Flags.MENTIONS_ONLY not in channel.flags
         }
         for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
@@ -268,8 +290,9 @@ def main() -> None:
 
     if args.youtube_fetch_subtitles or args.youtube_fetch_audio:
         _logger.info("Fetching YouTube content...")
+        yt_video_filter = lambda x: video_filter(x) and x.youtube_id
 
-        for video in storage.list_videos(lambda x: x.youtube_id):
+        for video in storage.list_videos(yt_video_filter):
             # check if video can be accessed
 
             # FIXME: a way to refetch private/unavailable/memberships
@@ -315,7 +338,7 @@ def main() -> None:
                     cookies_from_browser=args.youtube_cookies_from_browser,
                 )
 
-        for video in storage.list_videos(lambda x: x.youtube_id):
+        for video in storage.list_videos(yt_video_filter):
             video.update_gitignore()
 
     # transcribe audio with whisper
@@ -323,7 +346,7 @@ def main() -> None:
     if args.whisper_transcribe_audio:
         _logger.info("Fetching and transcribing audio into subtitles with Whisper...")
 
-        for video in storage.list_videos():
+        for video in storage.list_videos(video_filter):
             whisper_subtitles = list(video.list_content(lambda x: x.item_type == "subtitle" and x.source == "whisper"))
             if whisper_subtitles:
                 continue
@@ -343,6 +366,7 @@ def main() -> None:
             storage,
             value=args.search,
             regex=args.search_regex,
+            video_filter=video_filter,
             filter_source=args.search_sources or None,
             filter_lang=args.search_langs or None,
         )

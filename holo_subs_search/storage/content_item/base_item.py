@@ -7,13 +7,14 @@ import pathlib
 from typing import Any, ClassVar
 
 from ..mixins.files_mixin import FilesMixin
+from ..mixins.filterable_mixin import FilterableMixin
 from ..mixins.flags_mixin import FlagsMixin
 from ..mixins.metadata_mixin import MetadataMixin
 
 _logger = logging.getLogger(__name__)
 
 
-class BaseItem(FlagsMixin, MetadataMixin, FilesMixin):
+class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
     item_type: ClassVar[str] = "base"
 
     def __init__(self, *, path: pathlib.Path) -> None:

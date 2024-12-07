@@ -6,6 +6,7 @@ import pathlib
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .mixins.files_mixin import FilesMixin
+from .mixins.filterable_mixin import FilterableMixin
 from .mixins.metadata_mixin import MetadataMixin
 
 if TYPE_CHECKING:
@@ -14,8 +15,9 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-class Record(MetadataMixin, FilesMixin, abc.ABC):
+class Record(MetadataMixin, FilterableMixin, FilesMixin, abc.ABC):
     model_name: ClassVar[str]
+    id: str  # annotation to make it filterable
 
     def __init__(self, *, storage: Storage, id: str) -> None:
         super().__init__()
