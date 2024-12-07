@@ -1,5 +1,3 @@
-#!/usr/bin/env python3.11
-
 import bisect
 import dataclasses
 import datetime

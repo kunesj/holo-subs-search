@@ -1,5 +1,3 @@
-#!/usr/bin/env python3.11
-
 from __future__ import annotations
 
 import json
