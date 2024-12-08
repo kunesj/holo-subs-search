@@ -13,7 +13,7 @@ EMBEDDING_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 
 
 @dataclasses.dataclass
-class DiarizationResponseSegment:
+class DiarizationSegment:
     start: float
     end: float
     speaker: str
@@ -27,9 +27,9 @@ class DiarizationResponseSegment:
 
 
 @dataclasses.dataclass
-class DiarizationResponse:
+class Diarization:
     diarization_model: str
-    diarization: list[DiarizationResponseSegment]
+    diarization: list[DiarizationSegment]
     embedding_model: str
     embeddings: dict[str, list[float]]
 
@@ -37,7 +37,7 @@ class DiarizationResponse:
     def from_json(cls: type[Self], value: dict[str, Any]) -> Self:
         return cls(
             diarization_model=value["diarization_model"],
-            diarization=[DiarizationResponseSegment.from_json(x) for x in value["diarization"]],
+            diarization=[DiarizationSegment.from_json(x) for x in value["diarization"]],
             embedding_model=value["embedding_model"],
             embeddings=value["embeddings"],
         )
@@ -59,7 +59,7 @@ def audio_to_diarization_response(
     embedding_model: str,
     huggingface_token: str | None = None,
     timeout: float | None = None,
-) -> DiarizationResponse:
+) -> Diarization:
     """
     - Supports any format ffmpeg supports
     """
@@ -78,4 +78,4 @@ def audio_to_diarization_response(
     )
     response.raise_for_status()
 
-    return DiarizationResponse.from_json(response.json())
+    return Diarization.from_json(response.json())

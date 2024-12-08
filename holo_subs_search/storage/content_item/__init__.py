@@ -4,7 +4,7 @@ import typing
 
 from .audio_item import AudioItem
 from .base_item import BaseItem
-from .diarization_item import DiarizationItem, Diarization, DiarizationSegment
+from .diarization_item import DiarizationItem
 from .subtitle_item import SubtitleItem
 
 ContentItemType = AudioItem | BaseItem | DiarizationItem | SubtitleItem

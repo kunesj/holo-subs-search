@@ -8,9 +8,6 @@ from .base_item import BaseItem
 
 _logger = logging.getLogger(__name__)
 
-DiarizationSegment = pyannote_tools.DiarizationResponseSegment
-Diarization = pyannote_tools.DiarizationResponse
-
 
 class DiarizationItem(BaseItem):
     item_type = "diarization"
@@ -25,12 +22,12 @@ class DiarizationItem(BaseItem):
         return self.metadata.get("audio_id", None)
 
     @property
-    def diarization(self) -> Diarization | None:
+    def diarization(self) -> pyannote_tools.Diarization | None:
         raw = self.load_json_file(self.DIARIZATION_JSON)
-        return None if raw is None else Diarization.from_json(raw)
+        return None if raw is None else pyannote_tools.Diarization.from_json(raw)
 
     @diarization.setter
-    def diarization(self, value: Diarization) -> None:
+    def diarization(self, value: pyannote_tools.Diarization) -> None:
         self.save_json_file(self.DIARIZATION_JSON, value.to_json())
 
     @property
