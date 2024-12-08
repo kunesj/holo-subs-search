@@ -1,8 +1,7 @@
-#!/usr/bin/env python3.11
-
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 import re
 from typing import Any, Callable, ClassVar, TypeVar
@@ -31,6 +30,10 @@ class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
         return f"{self.__class__.__name__}[{self.path}]"
 
     # Fields / Properties
+
+    @property
+    def content_id(self) -> str:
+        return os.path.basename(self.path)
 
     @property
     def files_path(self) -> pathlib.Path:
@@ -62,7 +65,7 @@ class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
         if not parts:
             raise ValueError("At least one content ID part is required")
 
-        parts = [str(x) for x in parts]
+        parts = [str(x) for x in [cls.item_type, *parts]]
         parts = [re.sub(r"[^a-zA-Z0-9\-]+", "-", x) for x in parts]
 
         return "_".join(parts)
