@@ -182,6 +182,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         memberships: list[str] | None = None,
         force: bool = False,
     ) -> None:
+        _logger.debug("Fetching Youtube subtitles/audio for video %s - %s", self.id, self.published_at)
+
         # check if video can be accessed
 
         if not force:
@@ -221,7 +223,13 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         if not download_subtitles and not download_audio:
             return
 
-        _logger.info("Fetching Youtube subtitles/audio for video %s - %s", self.id, self.published_at)
+        _logger.info(
+            "Fetching Youtube subtitles/audio: video_id=%r, published_at=%r, download_subtitles=%r, download_audio=%r",
+            self.id,
+            self.published_at,
+            download_subtitles,
+            download_audio,
+        )
         try:
             for name, file_path in ydl_tools.download_video(
                 video_id=self.youtube_id,
@@ -336,7 +344,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         huggingface_token: str | None = None,
         force: bool = False,
     ) -> None:
-        _logger.info("Diarizing audio for video %s - %s", self.id, self.published_at)
+        _logger.debug("Diarizing audio for video %s - %s", self.id, self.published_at)
 
         for audio_item in self.list_content(AudioItem.build_filter()):
             # check for existing results
@@ -361,7 +369,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             # diarize audio
 
             _logger.info(
-                "Starting diarization of %r using diarization model %r and embedding model %r",
+                "Starting diarization: video_id=%r, audio_id=%r, diarization_model=%s, embedding_model=%r",
+                self.id,
                 audio_item.content_id,
                 diarization_model,
                 embedding_model,
@@ -406,7 +415,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         model: str,
         force: bool = False,
     ) -> None:
-        _logger.info("Transcribing audio for video %s - %s", self.id, self.published_at)
+        _logger.debug("Transcribing audio for video %s - %s", self.id, self.published_at)
 
         for audio_item in self.list_content(AudioItem.build_filter()):
             for diarization_item in self.list_content(
@@ -441,7 +450,12 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 # transcribe the audio into SRT format
 
                 _logger.info(
-                    "Starting transcription of %r using model %r and language %r", audio_item.content_id, model, lang
+                    "Starting transcription: video_id=%r, audio_id=%r, diarization_id=%s, whisper_model=%r, language=%r",
+                    self.id,
+                    audio_item.content_id,
+                    diarization_item.content_id,
+                    model,
+                    lang,
                 )
 
                 # FIXME: use diarization to split audio into small parts to prevent halucinations
