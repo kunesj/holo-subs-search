@@ -175,12 +175,53 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     def fetch_youtube(
         self,
+        *,
         download_subtitles: list[str] | None = None,
         download_audio: bool = False,
         cookies_from_browser: str | None = None,
+        memberships: list[str] | None = None,
+        force: bool = False,
     ) -> None:
-        _logger.info("Fetching Youtube subtitles for video %s - %s", self.id, self.published_at)
+        # check if video can be accessed
 
+        if not force:
+            if Flags.YOUTUBE_PRIVATE in self.flags:
+                return
+            elif Flags.YOUTUBE_UNAVAILABLE in self.flags:
+                return
+            elif Flags.YOUTUBE_AGE_RESTRICTED in self.flags and not cookies_from_browser:
+                return
+
+            if Flags.YOUTUBE_MEMBERSHIP in self.flags:
+                channel = self.storage.get_channel(self.channel_id)
+                if not channel.exists() or channel.youtube_id not in (memberships or []):
+                    return  # not accessible membership video
+
+        # calculate what subtitles to download
+
+        if download_subtitles and not force:
+            fetch_langs = set(download_subtitles) - set(self.youtube_subtitles.keys())
+            for item in self.list_content(
+                lambda x: x.item_type == "subtitle" and x.source == "youtube" and x.lang in fetch_langs
+            ):
+                fetch_langs -= {item.lang}
+            download_subtitles = list(fetch_langs)
+
+        # calculate if audio should be downloaded
+
+        if download_audio and not force:
+            download_audio = not bool(
+                list(
+                    self.list_content(AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube")))
+                )
+            )
+
+        # fetch content
+
+        if not download_subtitles and not download_audio:
+            return
+
+        _logger.info("Fetching Youtube subtitles/audio for video %s - %s", self.id, self.published_at)
         try:
             for name, file_path in ydl_tools.download_video(
                 video_id=self.youtube_id,
@@ -201,7 +242,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                 elif any(name.endswith(f".{x}") for x in whisper_tools.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
-                        content_id = AudioItem.build_content_id("youtube", "audio", name)
+                        content_id = AudioItem.build_content_id("youtube", name)
                         item = AudioItem(path=self.content_path / content_id)
 
                         metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
@@ -210,7 +251,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                 elif name.endswith(".srt"):  # youtube.en.srt
                     with open(file_path, "r") as f:
-                        content_id = SubtitleItem.build_content_id("youtube", "subtitle", name)
+                        content_id = SubtitleItem.build_content_id("youtube", name)
                         item = SubtitleItem(path=self.content_path / content_id)
                         flags = set()
 

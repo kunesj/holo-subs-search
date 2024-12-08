@@ -170,6 +170,11 @@ def main() -> None:
         "--youtube-fetch-audio",
         action="store_true",
     )
+    parser.add_argument(
+        "--youtube-force",
+        action="store_true",
+        help="Don't skip already processed or unavailable items",
+    )
     # ---- Whisper ----
     parser.add_argument(
         "--whisper-transcribe-audio",
@@ -272,54 +277,20 @@ def main() -> None:
 
     if args.youtube_fetch_subtitles or args.youtube_fetch_audio:
         _logger.info("Fetching YouTube content...")
-        yt_video_filter = lambda x: video_filter(x) and x.youtube_id
 
-        for video in storage.list_videos(yt_video_filter):
-            # check if video can be accessed
+        for video in storage.list_videos(lambda x: video_filter(x) and x.youtube_id):
+            video.fetch_youtube(
+                download_subtitles=args.youtube_fetch_subtitles_langs if args.youtube_fetch_subtitles else None,
+                download_audio=args.youtube_fetch_audio,
+                cookies_from_browser=args.youtube_cookies_from_browser,
+                memberships=args.youtube_memberships,
+                force=args.youtube_force,
+            )
 
-            # FIXME: a way to refetch private/unavailable/memberships
-            if Flags.YOUTUBE_PRIVATE in video.flags:
-                continue
-            elif Flags.YOUTUBE_UNAVAILABLE in video.flags:
-                continue
-            elif Flags.YOUTUBE_AGE_RESTRICTED in video.flags and not args.youtube_cookies_from_browser:
-                continue
-
-            if Flags.YOUTUBE_MEMBERSHIP in video.flags:
-                channel = storage.get_channel(video.channel_id)
-                if not channel.exists() or channel.youtube_id not in args.youtube_memberships:
-                    continue  # not accessible membership video
-
-            # calculate what subtitles to download
-
-            download_subtitles = None
-            if args.youtube_fetch_subtitles:
-                fetch_langs = set(args.youtube_fetch_subtitles_langs) - set(video.youtube_subtitles.keys())
-                for item in video.list_content(
-                    lambda x: x.item_type == "subtitle" and x.source == "youtube" and x.lang in fetch_langs
-                ):
-                    fetch_langs -= {item.lang}
-
-                if fetch_langs:
-                    download_subtitles = list(fetch_langs)
-
-            # calculate if audio should be downloaded
-
-            download_audio = False
-            if args.youtube_fetch_audio:
-                download_audio = len([*video.list_content(AudioItem.build_str_filter("source:eq:youtube"))]) == 0
-
-            # download data
-
-            if download_subtitles or download_audio:
-                video.fetch_youtube(
-                    download_subtitles=download_subtitles,
-                    download_audio=download_audio,
-                    cookies_from_browser=args.youtube_cookies_from_browser,
-                )
-
-        for video in storage.list_videos(yt_video_filter):
+        for video in storage.list_videos(lambda x: video_filter(x) and x.youtube_id):
             video.update_gitignore()
+
+
 
     # transcribe audio with whisper
 
