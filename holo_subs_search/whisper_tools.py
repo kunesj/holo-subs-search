@@ -68,6 +68,9 @@ def audio_to_srt_subtitles(
     api_base_url: str,
     api_key: str,
     model: str,
+    # It is recommended to set this as it will improve the performance.
+    # See https://github.com/fedirz/faster-whisper-server/blob/master/src/faster_whisper_server/config.py#L41C7-L41C15
+    # for supported values.
     language: str | None = None,
     prompt: str | None = None,
     temperature: float | None = None,
