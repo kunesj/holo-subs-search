@@ -33,20 +33,16 @@ class SubtitleItem(BaseItem):
     # Transcription properties
 
     @property
-    def whisper_audio(self) -> str | None:
-        return self.metadata.get("whisper_audio", None)
+    def audio_id(self) -> str | None:
+        return self.metadata.get("audio_id", None)
 
-    @whisper_audio.setter
-    def whisper_audio(self, value: str | None) -> None:
-        self.metadata = dict(self.metadata, whisper_audio=value)
+    @property
+    def diarization_id(self) -> str | None:
+        return self.metadata.get("diarization_id", None)
 
     @property
     def whisper_model(self) -> str | None:
         return self.metadata.get("whisper_model", None)
-
-    @whisper_model.setter
-    def whisper_model(self, value: str | None) -> None:
-        self.metadata = dict(self.metadata, whisper_model=value)
 
     # Methods
 
@@ -57,7 +53,8 @@ class SubtitleItem(BaseItem):
         source: str,
         lang: str,
         subtitle_file: str,
-        whisper_audio: str | None = None,
+        audio_id: str | None = None,
+        diarization_id: str | None = None,
         whisper_model: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
@@ -65,6 +62,7 @@ class SubtitleItem(BaseItem):
             "source": source,
             "lang": lang,
             "subtitle_file": subtitle_file,
-            "whisper_audio": whisper_audio,
+            "audio_id": audio_id,
+            "diarization_id": diarization_id,
             "whisper_model": whisper_model,
         }
