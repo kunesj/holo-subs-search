@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
-from .. import whisper_tools, ydl_tools
+from .. import pyannote_tools, whisper_tools, ydl_tools
 from ..utils import AwareDateTime, json_dumps
-from .content_item import AudioItem, SubtitleItem
+from .content_item import AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
 from .mixins.filterable_mixin import FilterPart
 from .mixins.flags_mixin import Flags, FlagsMixin
@@ -325,6 +325,77 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 )
                 self.youtube_subtitles = dict(self.youtube_subtitles) | {lang: "missing" for lang in missing_langs}
 
+    # Pyannote
+
+    def pyannote_diarize_audio(
+        self,
+        *,
+        api_base_url: str,
+        diarization_model: str,
+        embedding_model: str,
+        huggingface_token: str | None = None,
+        force: bool = False,
+    ) -> None:
+        _logger.info("Diarizing audio for video %s - %s", self.id, self.published_at)
+
+        for audio_item in self.list_content(AudioItem.build_filter()):
+            # check for existing results
+
+            dia_items = list(
+                self.list_content(
+                    DiarizationItem.build_filter(
+                        FilterPart(name="source", operator="eq", value="pyannote"),
+                        FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
+                        FilterPart(name="diarization_model", operator="eq", value=diarization_model),
+                        FilterPart(name="embedding_model", operator="eq", value=embedding_model),
+                    )
+                )
+            )
+
+            if dia_items and not force:
+                continue
+
+            for dia_item in dia_items:
+                dia_item.path.unlink()
+
+            # diarize audio
+
+            _logger.info(
+                "Starting diarization of %r using diarization model %r and embedding model %r",
+                audio_item.content_id,
+                diarization_model,
+                embedding_model,
+            )
+
+            start_time = time.time()
+            diarization = pyannote_tools.audio_to_diarization_response(
+                path=audio_item.audio_path,
+                api_base_url=api_base_url,
+                diarization_model=diarization_model,
+                embedding_model=embedding_model,
+                huggingface_token=huggingface_token,
+            )
+            end_time = time.time()
+
+            _logger.info("Diarization finished in %i seconds", end_time - start_time)
+
+            # save diarization file
+
+            content_id = DiarizationItem.build_content_id(
+                "pyannote",
+                diarization.diarization_model,
+                diarization.embedding_model,
+                audio_item.content_id,
+            )
+            item = DiarizationItem(path=self.content_path / content_id)
+
+            metadata = DiarizationItem.build_metadata(
+                source="pyannote",
+                audio_id=audio_item.content_id,
+            )
+            item.create(metadata)
+            item.diarization = diarization
+
     # Whisper
 
     def whisper_transcribe_audio(
@@ -333,57 +404,81 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         api_base_url: str,
         api_key: str,
         model: str,
+        force: bool = False,
     ) -> None:
         _logger.info("Transcribing audio for video %s - %s", self.id, self.published_at)
 
         for audio_item in self.list_content(AudioItem.build_filter()):
-            lang = "en"  # FIXME: detect audio language
-
-            # transcribe the audio into SRT format
-
-            _logger.info(
-                "Starting transcription of %r using model %r and language %r", audio_item.audio_file, model, lang
-            )
-
-            start_time = time.time()
-            content = whisper_tools.audio_to_srt_subtitles(
-                path=audio_item.audio_path,
-                api_base_url=api_base_url,
-                api_key=api_key,
-                model=model,
-                language=lang,
-            )
-            end_time = time.time()
-
-            _logger.info("Transcription finished in %i seconds", end_time - start_time)
-
-            # save/replace subtitle file
-            # - keeps transcriptions from different models and for different languages
-
-            for sub_item in self.list_content(
-                SubtitleItem.build_filter(
-                    FilterPart(name="source", operator="eq", value="whisper"),
-                    FilterPart(name="lang", operator="eq", value=lang),
-                    FilterPart(name="whisper_model", operator="eq", value=model),
+            for diarization_item in self.list_content(
+                DiarizationItem.build_filter(
+                    FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
                 )
             ):
-                sub_item.path.unlink()
+                # FIXME: detect audio language
+                #   - https://github.com/openai/whisper/discussions/2009#discussioncomment-8507575
+                lang = "en"
 
-            subtitle_file = f"transcription.{lang}.srt"
-            content_id = SubtitleItem.build_content_id("whisper", model, "subtitle", subtitle_file)
-            item = SubtitleItem(path=self.content_path / content_id)
+                # check for existing results
 
-            metadata = SubtitleItem.build_metadata(
-                source="whisper",
-                lang=lang,
-                flags={Flags.SUBTITLE_TRANSCRIPTION},
-                subtitle_file=subtitle_file,
-                whisper_audio=audio_item.audio_file,
-                whisper_model=model,
-            )
+                sub_items = list(
+                    self.list_content(
+                        SubtitleItem.build_filter(
+                            FilterPart(name="source", operator="eq", value="whisper"),
+                            FilterPart(name="lang", operator="eq", value=lang),
+                            FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
+                            FilterPart(name="diarization_id", operator="eq", value=diarization_item.content_id),
+                            FilterPart(name="whisper_model", operator="eq", value=model),
+                        )
+                    )
+                )
 
-            item.create(metadata)
-            item.subtitle_path.write_text(content)
+                if sub_items and not force:
+                    continue
+
+                for sub_item in sub_items:
+                    sub_item.path.unlink()
+
+                # transcribe the audio into SRT format
+
+                _logger.info(
+                    "Starting transcription of %r using model %r and language %r", audio_item.content_id, model, lang
+                )
+
+                # FIXME: use diarization to split audio into small parts to prevent halucinations
+
+                start_time = time.time()
+                content = whisper_tools.audio_to_srt_subtitles(
+                    path=audio_item.audio_path,
+                    api_base_url=api_base_url,
+                    api_key=api_key,
+                    model=model,
+                    language=lang,
+                )
+                end_time = time.time()
+
+                _logger.info("Transcription finished in %i seconds", end_time - start_time)
+
+                # save subtitle file
+                # - keeps transcriptions from different models and for different languages
+
+                subtitle_file = f"transcription.{lang}.srt"
+                content_id = SubtitleItem.build_content_id(
+                    "whisper", audio_item.content_id, diarization_item.content_id, model, subtitle_file
+                )
+                item = SubtitleItem(path=self.content_path / content_id)
+
+                metadata = SubtitleItem.build_metadata(
+                    source="whisper",
+                    lang=lang,
+                    flags={Flags.SUBTITLE_TRANSCRIPTION},
+                    subtitle_file=subtitle_file,
+                    audio_id=audio_item.content_id,
+                    diarization_id=diarization_item.content_id,
+                    whisper_model=model,
+                )
+
+                item.create(metadata)
+                item.subtitle_path.write_text(content)
 
 
 # Following imports must be at the end of file to prevent cyclic import error

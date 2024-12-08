@@ -10,9 +10,9 @@ from typing import Callable
 
 import termcolor
 
-from . import holodex_tools, sub_parser, sub_search, whisper_tools
-from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
-from .storage.content_item import AudioItem, SubtitleItem
+from . import holodex_tools, pyannote_tools, sub_parser, sub_search, whisper_tools
+from .storage import ChannelRecord, Flags, Storage, VideoRecord
+from .storage.content_item import SubtitleItem
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))
@@ -175,6 +175,34 @@ def main() -> None:
         action="store_true",
         help="Don't skip already processed or unavailable items",
     )
+    # ---- HuggingFace ----
+    parser.add_argument(
+        "--huggingface-token",
+        default=None,
+    )
+    # ---- Pyannote ----
+    parser.add_argument(
+        "--pyannote-diarize-audio",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--pyannote-api-base-url",
+        default="http://localhost:8001/",
+        help="Url of pyannote-server API",
+    )
+    parser.add_argument(
+        "--pyannote-diarization-model",
+        default=pyannote_tools.DIARIZATION_MODEL,
+    )
+    parser.add_argument(
+        "--pyannote-embedding-model",
+        default=pyannote_tools.EMBEDDING_MODEL,
+    )
+    parser.add_argument(
+        "--pyannote-force",
+        action="store_true",
+        help="Don't skip already processed items",
+    )
     # ---- Whisper ----
     parser.add_argument(
         "--whisper-transcribe-audio",
@@ -196,6 +224,11 @@ def main() -> None:
             "Name of specific Whisper model to load. "
             "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API."
         ),
+    )
+    parser.add_argument(
+        "--whisper-force",
+        action="store_true",
+        help="Don't skip already processed items",
     )
     # ---- search subtitles ----
     parser.add_argument(
@@ -290,30 +323,30 @@ def main() -> None:
         for video in storage.list_videos(lambda x: video_filter(x) and x.youtube_id):
             video.update_gitignore()
 
+    # diarize audio with pyannote
 
+    if args.pyannote_diarize_audio:
+        _logger.info("Diarizing audio into speakers with Pyannote...")
+        for video in storage.list_videos(video_filter):
+            video.pyannote_diarize_audio(
+                api_base_url=args.pyannote_api_base_url,
+                diarization_model=args.pyannote_diarization_model,
+                embedding_model=args.pyannote_embedding_model,
+                huggingface_token=args.huggingface_token,
+                force=args.pyannote_force,
+            )
 
     # transcribe audio with whisper
 
     if args.whisper_transcribe_audio:
-        _logger.info("Fetching and transcribing audio into subtitles with Whisper...")
+        _logger.info("Transcribing audio into subtitles with Whisper...")
 
         for video in storage.list_videos(video_filter):
-            whisper_subtitles = list(
-                video.list_content(
-                    SubtitleItem.build_filter(
-                        FilterPart(name="source", operator="eq", value="whisper"),
-                        FilterPart(name="whisper_model", operator="eq", value=args.whisper_model),
-                    )
-                )
-            )
-            if whisper_subtitles:
-                # whisper subtitles for this model were already transcribed
-                continue
-
             video.whisper_transcribe_audio(
                 api_base_url=args.whisper_api_base_url,
                 api_key=args.whisper_api_key,
                 model=args.whisper_model,
+                force=args.whisper_force,
             )
 
     # searching parsed subtitles

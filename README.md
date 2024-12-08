@@ -5,6 +5,7 @@ Tool for searching transcriptions of vtuber videos.
 Uses:
 - Metadata from [Holodex](https://holodex.net)
 - Subtitles and audio from Youtube
+- [pyannote-audio](https://github.com/pyannote/pyannote-audio) for speaker diarization
 - [Whisper](https://github.com/fedirz/faster-whisper-server) for transcription
 
 ![example.png](./example.png)
@@ -75,15 +76,31 @@ Everything should also be able to run on CPU, but you would have use the `*-cpu`
 python3.11 -m holo_subs_search --youtube-fetch-audio
 ```
 
+### Diarize Audio
+
+Detecting which parts of the audio file contain speech, is needed to prevent hallucinations later in the transcription step. As a bonus, this will also allow us to detect which lines were spoken by who in the future.
+
+- Get access to default models
+    - Accept https://hf.co/pyannote/segmentation-3.0 user conditions
+    - Accept https://hf.co/pyannote/speaker-diarization-3.1 user conditions
+    - Create access token at https://hf.co/settings/tokens 
+
+
+- Start `PyAnnote` server
     ```bash
-    python3.11 -m holo_subs_search --youtube-fetch-audio
+    docker compose up pyannote-server-cuda
+    ```
+
+
+- Process the audio files
+    ```bash
+    python3.11 -m holo_subs_search --pyannote-diarize-audio --huggingface-token "abcdefgh"
     ```
 
 
 ### Transcribe Audio
 
 - Start `Whisper` server
-
     ```bash
     docker compose up faster-whisper-server-cuda
     ```
@@ -92,7 +109,6 @@ python3.11 -m holo_subs_search --youtube-fetch-audio
 
 
 - Transcribe the audio files into subtitles
-
     ```bash
     python3.11 -m holo_subs_search --whisper-transcribe-audio
     ```
@@ -102,17 +118,18 @@ python3.11 -m holo_subs_search --youtube-fetch-audio
     - 2 minutes with `Systran/faster-whisper-tiny`
 
 - Search transcribed audio
-
     ```bash
     python3.11 -m holo_subs_search --search "solo live" --search-subtitle-filter source:eq:whisper
     ```
 
 
-## Downloaded Data
+## Processed Data
 
-If you don't want to spend many hours/days downloading everything, then data for some channels can be found in following repos. Use `--storage PATH` to search data in downloaded repo.
+If you don't want to spend many hours/days downloading and processing everything, then data for some channels can be found in following repos:
 
 - https://github.com/kunesj/holo-subs-search-data
+
+Use `--storage PATH` to search data in the downloaded repo.
 
 
 ## Development
