@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import hashlib
 import json
 from types import MappingProxyType
 from typing import Annotated, Any, AsyncIterator, Iterator, TypeVar
@@ -44,3 +45,8 @@ def _json_dumps_default(obj: Any) -> Any:
 
 def json_dumps(obj) -> str:
     return json.dumps(obj, default=_json_dumps_default, sort_keys=True)
+
+
+def get_checksum(data: bytes) -> str:
+    """Computes checksum of binary data."""
+    return hashlib.sha1(data).hexdigest()
