@@ -27,6 +27,9 @@ WHISPER_AUDIO_FORMATS = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wa
 # https://huggingface.co/nyrahealth/faster_CrisperWhisper
 CRISPER_WHISPER_MODEL = "nyrahealth/faster_CrisperWhisper"
 
+# This model should be used when using OpenAI API
+OPENAI_WHISPER_MODEL = "whisper-1"
+
 
 def model_size_and_audio_lang_to_model(model_size: ModelSize, audio_lang: str | None = None) -> str:
     """
@@ -64,13 +67,24 @@ def audio_to_srt_subtitles(
     *,
     api_base_url: str,
     api_key: str,
-    model: str | Literal["whisper-1"],
+    model: str,
     language: str | None = None,
     prompt: str | None = None,
     temperature: float | None = None,
     timeout: str | None = None,
 ) -> str:
     """
+    IMPORTANT:
+    - Whisper hallucinates a lot in silent parts, so use diarization to transcribe only parts of audio with speech.
+    - Whisper internally splits audio into 30s segments, which can cause transcription mistakes.
+
+    NOTES:
+    - Transcription Software Comparisons:
+        https://blog.lopp.net/open-source-transcription-software-comparisons/
+        - Whisper models have the best accuracy
+        - Small whisper models tend to skip filler words
+        https://www.gladia.io/blog/best-open-source-speech-to-text-models
+        - Whisper internally splits audio into 30s chunks
     - See WHISPER_INPUT_FORMATS for supported formats
     - Whisper internally resamples audio to 16kHz, so the input does not have to be high quality
         https://dev.to/mxro/optimise-openai-whisper-api-audio-format-sampling-rate-and-quality-29fj
