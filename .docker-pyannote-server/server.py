@@ -136,18 +136,26 @@ def healthcheck() -> Response:
 @app.post("/diarization")
 async def diarization(
     file: UploadFile,
-    diarization_model: Annotated[str, Query()] = "pyannote/speaker-diarization-3.1",
-    embedding_model: Annotated[str, Query()] = "speechbrain/spkrec-ecapa-voxceleb",
+    diarization_model: Annotated[str, Query()],
+    embedding_model: Annotated[str, Query()],
     huggingface_token: Annotated[str | None, Query()] = None,
 ) -> DiarizationResponse:
     """
-    To use the default diarization model:
-    - Accept https://hf.co/pyannote/segmentation-3.0 user conditions
-    - Accept https://hf.co/pyannote/speaker-diarization-3.1 user conditions
-    - Create access token at https://hf.co/settings/tokens and use it when calling this endpoint
+    Parameters:
+        file:
+        - Supports all audio formats that are supported by `pydub`, but using `wav` will be faster,
+          because the file will not have to be converted into it.
 
-    Supports all audio formats that are supported by `pydub`, but using `wav` will be faster,
-    because the file will not have to be converted into it.
+        diarization_model:
+        - Accept https://hf.co/pyannote/segmentation-3.0 user conditions
+        - Accept https://hf.co/pyannote/speaker-diarization-3.1 user conditions
+        - Use: pyannote/speaker-diarization-3.1
+
+        embedding_model:
+        - Use: speechbrain/spkrec-ecapa-voxceleb
+
+        embedding_model:
+        - Create access token at https://hf.co/settings/tokens and use it when calling this endpoint
 
     Probably doesn't handle switching between models or concurrent requests very well.
 
