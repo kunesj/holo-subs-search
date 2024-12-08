@@ -11,7 +11,7 @@ import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
 from .. import pyannote_tools, whisper_tools, ydl_tools
-from ..utils import AwareDateTime, json_dumps
+from ..utils import AwareDateTime, get_checksum, json_dumps
 from .content_item import AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
 from .mixins.filterable_mixin import FilterPart
@@ -250,16 +250,18 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                 elif any(name.endswith(f".{x}") for x in whisper_tools.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
-                        content_id = AudioItem.build_content_id("youtube", name)
+                        content = f.read()
+                        content_id = AudioItem.build_content_id("youtube", get_checksum(content), name)
                         item = AudioItem(path=self.content_path / content_id)
 
                         metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
                         item.create(metadata)
-                        item.audio_path.write_bytes(f.read())
+                        item.audio_path.write_bytes(content)
 
                 elif name.endswith(".srt"):  # youtube.en.srt
-                    with open(file_path, "r") as f:
-                        content_id = SubtitleItem.build_content_id("youtube", name)
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                        content_id = SubtitleItem.build_content_id("youtube", get_checksum(content), name)
                         item = SubtitleItem(path=self.content_path / content_id)
                         flags = set()
 
@@ -280,9 +282,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                             flags=flags,
                             subtitle_file=name,
                         )
-
                         item.create(metadata)
-                        item.subtitle_path.write_text(f.read())
+                        item.subtitle_path.write_bytes(content)
 
                 else:
                     _logger.warning("Fetched unexpected file: %s", name)
@@ -390,12 +391,18 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
             # save diarization file
 
-            content_id = DiarizationItem.build_content_id(
-                "pyannote",
-                diarization.diarization_model,
-                diarization.embedding_model,
-                audio_item.content_id,
+            checksum = get_checksum(
+                str(
+                    [
+                        audio_item.content_id,
+                        diarization.diarization_model,
+                        diarization.embedding_model,
+                        json.dumps(diarization.to_json(), sort_keys=True),
+                    ]
+                ).encode("utf-8")
             )
+
+            content_id = DiarizationItem.build_content_id("pyannote", checksum)
             item = DiarizationItem(path=self.content_path / content_id)
 
             metadata = DiarizationItem.build_metadata(
@@ -475,17 +482,27 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 # save subtitle file
                 # - keeps transcriptions from different models and for different languages
 
-                subtitle_file = f"transcription.{lang}.srt"
-                content_id = SubtitleItem.build_content_id(
-                    "whisper", audio_item.content_id, diarization_item.content_id, model, subtitle_file
+                checksum = get_checksum(
+                    str(
+                        [
+                            audio_item.content_id,
+                            diarization_item.content_id,
+                            model,
+                            lang,
+                            content,
+                        ]
+                    ).encode("utf-8")
                 )
+
+                name = f"transcription.{lang}.srt"
+                content_id = SubtitleItem.build_content_id("whisper", checksum, name)
                 item = SubtitleItem(path=self.content_path / content_id)
 
                 metadata = SubtitleItem.build_metadata(
                     source="whisper",
                     lang=lang,
                     flags={Flags.SUBTITLE_TRANSCRIPTION},
-                    subtitle_file=subtitle_file,
+                    subtitle_file=name,
                     audio_id=audio_item.content_id,
                     diarization_id=diarization_item.content_id,
                     whisper_model=model,
