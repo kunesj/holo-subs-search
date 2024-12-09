@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
-from .. import pyannote_tools, whisper_tools, ydl_tools
+from .. import diarization, transcription, ydl_tools
 from ..utils import AwareDateTime, get_checksum, json_dumps
 from .content_item import AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
@@ -248,7 +248,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                             self.youtube_info = info
 
-                elif any(name.endswith(f".{x}") for x in whisper_tools.WHISPER_AUDIO_FORMATS):
+                elif any(name.endswith(f".{x}") for x in transcription.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
                         content = f.read()
                         content_id = AudioItem.build_content_id("youtube", get_checksum(content), name)
@@ -378,7 +378,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             )
 
             start_time = time.time()
-            diarization = pyannote_tools.audio_to_diarization_response(
+            dia = diarization.audio_to_diarization_response(
                 path=audio_item.audio_path,
                 api_base_url=api_base_url,
                 diarization_model=diarization_model,
@@ -395,9 +395,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 str(
                     [
                         audio_item.content_id,
-                        diarization.diarization_model,
-                        diarization.embedding_model,
-                        json.dumps(diarization.to_json(), sort_keys=True),
+                        dia.diarization_model,
+                        dia.embedding_model,
+                        json.dumps(dia.model_dump(mode="json"), sort_keys=True),
                     ]
                 ).encode("utf-8")
             )
@@ -410,7 +410,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 audio_id=audio_item.content_id,
             )
             item.create(metadata)
-            item.diarization = diarization
+            item.diarization = dia
 
     # Whisper
 
@@ -430,17 +430,12 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                     FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
                 )
             ):
-                # FIXME: detect audio language
-                #   - https://github.com/openai/whisper/discussions/2009#discussioncomment-8507575
-                lang = "en"
-
                 # check for existing results
 
                 sub_items = list(
                     self.list_content(
                         SubtitleItem.build_filter(
                             FilterPart(name="source", operator="eq", value="whisper"),
-                            FilterPart(name="lang", operator="eq", value=lang),
                             FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
                             FilterPart(name="diarization_id", operator="eq", value=diarization_item.content_id),
                             FilterPart(name="whisper_model", operator="eq", value=model),
@@ -457,26 +452,25 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 # transcribe the audio into SRT format
 
                 _logger.info(
-                    "Starting transcription: video_id=%r, audio_id=%r, diarization_id=%s, whisper_model=%r, language=%r",
+                    "Starting transcription: video_id=%r, audio_id=%r, diarization_id=%s, whisper_model=%r",
                     self.id,
                     audio_item.content_id,
                     diarization_item.content_id,
                     model,
-                    lang,
                 )
-
-                # FIXME: use diarization to split audio into small parts to prevent halucinations
-
                 start_time = time.time()
-                content = whisper_tools.audio_to_srt_subtitles(
-                    path=audio_item.audio_path,
+
+                tx = transcription.transcribe_diarized_audio(
+                    file=audio_item.audio_path,
+                    diarization=diarization_item.diarization,
                     api_base_url=api_base_url,
                     api_key=api_key,
                     model=model,
-                    language=lang,
                 )
-                end_time = time.time()
+                lang = tx.lang
+                content = tx.to_srt()
 
+                end_time = time.time()
                 _logger.info("Transcription finished in %i seconds", end_time - start_time)
 
                 # save subtitle file

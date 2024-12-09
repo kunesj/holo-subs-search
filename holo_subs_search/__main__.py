@@ -5,12 +5,11 @@ import datetime
 import logging
 import os
 import pathlib
-import time
 from typing import Callable
 
 import termcolor
 
-from . import holodex_tools, pyannote_tools, sub_parser, sub_search, whisper_tools
+from . import diarization, holodex_tools, transcription
 from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
 from .storage.content_item import AudioItem, SubtitleItem
 
@@ -30,18 +29,13 @@ def _search_video_subtitles(
     time_after: int = 15,
 ) -> None:
     if not subtitle_filter:
-        subtitle_filter = SubtitleItem.build_str_filter()
+        subtitle_filter = SubtitleItem.build_filter()
 
     for video in storage.list_videos(video_filter):
         for item in video.list_content(lambda x: subtitle_filter(x) and x.subtitle_file.endswith(".srt")):
             content = item.subtitle_path.read_text()
-            parsed = sub_parser.SubFile(
-                timestamp=time.time(),
-                source=item.source,
-                lang=item.lang,
-                lines=[x for x in sub_parser.parse_srt_file(content)],
-            )
-            searchable = sub_search.SearchableSubFile.from_sub_file(parsed)
+            tx = transcription.Transcription.from_srt(content, lang=item.lang)
+            searchable = transcription.SearchableTranscription.from_transcription(tx)
 
             header_printed = False
             for match_idx, indexes in enumerate(searchable.search(value=value, regex=regex)):
@@ -51,7 +45,7 @@ def _search_video_subtitles(
                     parts = [
                         video.published_at.strftime("%Y-%m-%d") if video.published_at else None,
                         video.id,
-                        parsed.lang,
+                        tx.lang,
                     ]
 
                     if Flags.YOUTUBE_MEMBERSHIP in video.flags:
@@ -63,30 +57,26 @@ def _search_video_subtitles(
 
                 # print timestamp of the match and url to open it
 
-                ts_line = searchable.lines[indexes[0]]
-                ts_seconds = int(ts_line.start.total_seconds())
+                ts_segment = searchable.segments[indexes[0]]
+                ts_seconds = int(ts_segment.start)
                 ts_url = f"{video.youtube_url}&t={ts_seconds}"
                 termcolor.cprint(f">>>>> {datetime.timedelta(seconds=ts_seconds)} | {ts_url}", attrs=["bold"])
 
                 # expand range of printed lines to add context
 
-                left_edge_index = searchable.index_to_past_index(
-                    indexes[0], delta=datetime.timedelta(seconds=time_before)
-                )
-                right_edge_index = searchable.index_to_future_index(
-                    indexes[-1], delta=datetime.timedelta(seconds=time_after)
-                )
+                left_edge_index = searchable.index_to_past_index(indexes[0], delta_t=time_before)
+                right_edge_index = searchable.index_to_future_index(indexes[-1], delta_t=time_after)
 
                 # print match lines
 
                 for line_idx in range(left_edge_index, right_edge_index + 1):
-                    ts_line = searchable.lines[line_idx]
-                    ts_seconds = int(ts_line.start.total_seconds())
+                    ts_segment = searchable.segments[line_idx]
+                    ts_seconds = int(ts_segment.start)
 
                     if line_idx in indexes:
-                        ts_content = termcolor.colored(ts_line.content, "magenta")
+                        ts_content = termcolor.colored(ts_segment.text, "magenta")
                     else:
-                        ts_content = ts_line.content
+                        ts_content = ts_segment.text
 
                     print(f"{datetime.timedelta(seconds=ts_seconds)} | {ts_content}")
 
@@ -197,11 +187,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--pyannote-diarization-model",
-        default=pyannote_tools.DIARIZATION_MODEL,
+        default=diarization.DIARIZATION_MODEL,
     )
     parser.add_argument(
         "--pyannote-embedding-model",
-        default=pyannote_tools.EMBEDDING_MODEL,
+        default=diarization.EMBEDDING_MODEL,
     )
     parser.add_argument(
         "--pyannote-force",
@@ -224,7 +214,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--whisper-model",
-        default=whisper_tools.CRISPER_WHISPER_MODEL,
+        default=transcription.CRISPER_WHISPER_MODEL,
         help=(
             "Name of specific Whisper model to load. "
             "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API."

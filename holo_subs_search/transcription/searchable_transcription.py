@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import bisect
 import dataclasses
-import datetime
 import re
-from typing import Self
+from typing import Iterator, Self
 
-from .sub_parser import Iterator, SubFile, SubLine
+from .transcription import Transcription, TranscriptionSegment
 
 
 @dataclasses.dataclass
@@ -15,7 +16,7 @@ class IndexedLine:
 
 
 @dataclasses.dataclass
-class SearchableSubFile:
+class SearchableTranscription:
     """
     - join all strings into one long string (new lines replaced by spaces)
     - remember indexes of where every part starts and ends
@@ -23,22 +24,22 @@ class SearchableSubFile:
     - convert string indexes into lines indexes
     """
 
-    sub_file: SubFile
+    tx: Transcription
     content: str
     indexed: list[IndexedLine]  # must be sorted
 
     @property
-    def lines(self) -> list[SubLine]:
-        return self.sub_file.lines
+    def segments(self) -> list[TranscriptionSegment]:
+        return self.tx.segments
 
     @classmethod
-    def from_sub_file(cls: type[Self], sub_file: SubFile) -> Self:
+    def from_transcription(cls: type[Self], tx: Transcription) -> Self:
         content_parts = []
         indexed_lines = []
         last_index = 0
 
-        for idx, sub_line in enumerate(sub_file.lines):
-            line_content = sub_line.content.replace("\n", " ")
+        for idx, tx_segment in enumerate(tx.segments):
+            line_content = tx_segment.text.replace("\n", " ")
             if not line_content:
                 continue
 
@@ -50,7 +51,7 @@ class SearchableSubFile:
             last_index += len(line_content)
 
         return cls(
-            sub_file=sub_file,
+            tx=tx,
             content="".join(content_parts),
             indexed=indexed_lines,
         )
@@ -121,34 +122,34 @@ class SearchableSubFile:
             for indexes in self.search_exact(value, case_sensitive=case_sensitive):
                 yield indexes
 
-    def index_to_past_index(self, index: int, delta: datetime.timedelta) -> int:
+    def index_to_past_index(self, index: int, delta_t: float) -> int:
         """
         Returns index of line that starts X amount of time before the line with provided index.
         Useful for adding relevant lines to search results.
         """
-        if delta.total_seconds() < 0:
-            raise ValueError(delta)
+        if delta_t < 0:
+            raise ValueError(delta_t)
 
-        min_start = self.lines[index].start - delta
+        min_start = self.segments[index].start - delta_t
         while index > 0:
-            if self.lines[index - 1].start >= min_start:
+            if self.segments[index - 1].start >= min_start:
                 index -= 1
             else:
                 break
 
         return index
 
-    def index_to_future_index(self, index: int, delta: datetime.timedelta) -> int:
+    def index_to_future_index(self, index: int, delta_t: float) -> int:
         """
         Returns index of line that starts X amount of time after the line with provided index.
         Useful for adding relevant lines to search results.
         """
-        if delta.total_seconds() < 0:
-            raise ValueError(delta)
+        if delta_t < 0:
+            raise ValueError(delta_t)
 
-        max_start = self.lines[index].start + delta
-        while index < len(self.lines):
-            if self.lines[index + 1].start <= max_start:
+        max_start = self.segments[index].start + delta_t
+        while index < len(self.segments):
+            if self.segments[index + 1].start <= max_start:
                 index += 1
             else:
                 break

@@ -2,3 +2,5 @@ yt-dlp>=2024.12.6
 srt==3.5.*
 holodex==0.11.11
 termcolor==2.5.0
+pydub==0.25.1
+pydantic>=2.8.2,<3.0.0
