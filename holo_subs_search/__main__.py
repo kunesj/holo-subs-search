@@ -11,8 +11,8 @@ from typing import Callable
 import termcolor
 
 from . import holodex_tools, pyannote_tools, sub_parser, sub_search, whisper_tools
-from .storage import ChannelRecord, Flags, Storage, VideoRecord
-from .storage.content_item import SubtitleItem
+from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
+from .storage.content_item import AudioItem, SubtitleItem
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))
@@ -171,6 +171,11 @@ def main() -> None:
         action="store_true",
     )
     parser.add_argument(
+        "--youtube-clear-audio",
+        action="store_true",
+        help="Delete downloaded youtube audio after it has been processed",
+    )
+    parser.add_argument(
         "--youtube-force",
         action="store_true",
         help="Don't skip already processed or unavailable items",
@@ -306,12 +311,13 @@ def main() -> None:
             video = VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             video.update_gitignore()
 
-    # fetching content
+    # process video
+    # TODO: run every step in separate thread to allow starting work on second video while first still has steps to do
 
-    if args.youtube_fetch_subtitles or args.youtube_fetch_audio:
-        _logger.info("Fetching YouTube content...")
+    for video in storage.list_videos(video_filter):
+        # fetching YouTube content
 
-        for video in storage.list_videos(lambda x: video_filter(x) and x.youtube_id):
+        if args.youtube_fetch_subtitles or args.youtube_fetch_audio and video.youtube_id:
             video.fetch_youtube(
                 download_subtitles=args.youtube_fetch_subtitles_langs if args.youtube_fetch_subtitles else None,
                 download_audio=args.youtube_fetch_audio,
@@ -319,15 +325,11 @@ def main() -> None:
                 memberships=args.youtube_memberships,
                 force=args.youtube_force,
             )
-
-        for video in storage.list_videos(lambda x: video_filter(x) and x.youtube_id):
             video.update_gitignore()
 
-    # diarize audio with pyannote
+        # diarize audio with pyannote
 
-    if args.pyannote_diarize_audio:
-        _logger.info("Diarizing audio into speakers with Pyannote...")
-        for video in storage.list_videos(video_filter):
+        if args.pyannote_diarize_audio:
             video.pyannote_diarize_audio(
                 api_base_url=args.pyannote_api_base_url,
                 diarization_model=args.pyannote_diarization_model,
@@ -336,18 +338,24 @@ def main() -> None:
                 force=args.pyannote_force,
             )
 
-    # transcribe audio with whisper
+        # transcribe audio with whisper
 
-    if args.whisper_transcribe_audio:
-        _logger.info("Transcribing audio into subtitles with Whisper...")
-
-        for video in storage.list_videos(video_filter):
+        if args.whisper_transcribe_audio:
             video.whisper_transcribe_audio(
                 api_base_url=args.whisper_api_base_url,
                 api_key=args.whisper_api_key,
                 model=args.whisper_model,
                 force=args.whisper_force,
             )
+
+        # clear audio
+
+        if args.youtube_clear_audio:
+            for audio_item in video.list_content(
+                AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube"))
+            ):
+                _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
+                audio_item.unlink()
 
     # searching parsed subtitles
 
