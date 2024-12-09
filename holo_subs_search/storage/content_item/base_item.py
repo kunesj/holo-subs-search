@@ -16,7 +16,7 @@ T = TypeVar("T")
 _logger = logging.getLogger(__name__)
 
 
-class BaseItem(FlagsMixin, MetadataMixin, FilterableMixin, FilesMixin):
+class BaseItem(FlagsMixin, MetadataMixin, FilesMixin, FilterableMixin):
     item_type: ClassVar[str] = "base"
 
     def __init__(self, *, path: pathlib.Path) -> None:

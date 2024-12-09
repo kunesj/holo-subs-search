@@ -17,7 +17,7 @@ T = TypeVar("T")
 _logger = logging.getLogger(__name__)
 
 
-class Record(MetadataMixin, FilterableMixin, FilesMixin, abc.ABC):
+class Record(MetadataMixin, FilesMixin, FilterableMixin, abc.ABC):
     model_name: ClassVar[str]
     id: str  # annotation to make it filterable
 

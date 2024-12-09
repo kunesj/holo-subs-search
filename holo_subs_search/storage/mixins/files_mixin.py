@@ -7,11 +7,12 @@ import pathlib
 from typing import Any
 
 from ...utils import json_dumps
+from .filterable_mixin import FilterableMixin
 
 _logger = logging.getLogger(__name__)
 
 
-class FilesMixin(abc.ABC):
+class FilesMixin(FilterableMixin, abc.ABC):
     _cache: dict
 
     def __init__(self, *args, **kwargs) -> None:
