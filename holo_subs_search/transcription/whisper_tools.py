@@ -154,12 +154,28 @@ def transcribe_diarized_audio(
 
     # compute language
 
-    _langs = [tx.lang for tx in chunk_txs]
-    lang_counts = {_lang: _langs.count(_lang) for _lang in set(_langs)}
-    lang = max(lang_counts.keys(), key=lambda key: lang_counts[key]) if lang_counts else "en"
-    _logger.info("Detected main language: %r: %r", lang, lang_counts)
+    lang, main_langs, lang_counts = transcriptions_to_langs(chunk_txs)
+    _logger.info("Detected language: primary=%r, main=%r, counts=%r", lang, main_langs, lang_counts)
+
+    # build transcription object and return
 
     return Transcription(lang=lang, segments=list(itertools.chain.from_iterable([tx.segments for tx in chunk_txs])))
+
+
+def transcriptions_to_langs(
+    txs: list[Transcription], *, min_occurrence: float = 0.1, default_lang: str = "en"
+) -> tuple[str, set[str], dict[str, int]]:
+    _langs = [tx.lang for tx in txs]
+    lang_counts = {_lang: _langs.count(_lang) for _lang in set(_langs)}
+
+    if lang_counts:
+        lang = max(lang_counts.keys(), key=lambda key: lang_counts[key])
+        main_langs = {_lang for _lang, _count in lang_counts.items() if _count >= (len(txs) * min_occurrence)}
+    else:
+        lang = default_lang
+        main_langs = {lang}
+
+    return lang, main_langs, lang_counts
 
 
 def diarization_to_audio_chunks(
