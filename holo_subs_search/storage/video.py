@@ -462,7 +462,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
                 tx = transcription.transcribe_diarized_audio(
                     file=audio_item.audio_path,
-                    diarization=diarization_item.diarization,
+                    dia=diarization_item.diarization,
                     api_base_url=api_base_url,
                     api_key=api_key,
                     model=model,
