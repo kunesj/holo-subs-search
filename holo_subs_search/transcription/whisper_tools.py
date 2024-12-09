@@ -118,7 +118,7 @@ def transcribe_diarized_audio(
 
     # transcribe chunks
 
-    _logger.info("Transcribing %s audio chunks...", len(chunks))
+    _logger.info("Transcribing %r audio chunks...", len(chunks))
     chunk_txs = []
 
     def _transcribe_chunk(chunk: AudioChunk, lang: str | None = None) -> Transcription:
@@ -139,15 +139,15 @@ def transcribe_diarized_audio(
         # make start/end absolute
         for tx_segment in tx.segments:
             tx_segment.start += chunk.start
-            tx_segment.end += chunk.end
+            tx_segment.end += chunk.start
 
         return tx
 
     for idx, chunk in enumerate(chunks):
         if idx != 0 and idx % 100 == 0:
-            _logger.info("Progress: %s/%s", idx + 1, len(chunks))
+            _logger.info("Progress: %r/%r", idx + 1, len(chunks))
 
-        _logger.info("Chunk: %s", chunk)
+        _logger.info("Chunk: %r", chunk)
         chunk_txs.append(_transcribe_chunk(chunk))
 
     _logger.info("Progress: DONE")
@@ -155,9 +155,9 @@ def transcribe_diarized_audio(
     # compute language
 
     _langs = [tx.lang for tx in chunk_txs]
-    lang_counts = {lang: _langs.count(lang) for lang in set(_langs)}
+    lang_counts = {_lang: _langs.count(_lang) for _lang in set(_langs)}
     lang = max(lang_counts.keys(), key=lambda key: lang_counts[key]) if lang_counts else "en"
-    _logger.info("Detected main language: %s: %s", lang, lang_counts)
+    _logger.info("Detected main language: %r: %r", lang, lang_counts)
 
     return Transcription(lang=lang, segments=list(itertools.chain.from_iterable([tx.segments for tx in chunk_txs])))
 
@@ -165,7 +165,7 @@ def transcribe_diarized_audio(
 def diarization_to_audio_chunks(
     dia: Diarization,
     *,
-    padding: float = 0.5,
+    padding: float = 0.2,
     min_duration: float = 0.1,
     max_duration: float = 30.0,
     max_gap: float = 2.0,
