@@ -1,58 +1,87 @@
 from __future__ import annotations
 
 import abc
-import dataclasses
-import re
-from typing import Any, Callable, Literal, TypeVar
+import datetime
+import functools
+import inspect
+from typing import Any, Callable, Literal, TypeVar, Union, get_type_hints
+
+import pydantic
+
+from ...utils import NoneType, iter_typing_types
 
 T = TypeVar("T")
-FilterOperatorType = Literal["eq", "ne", "includes", "excludes"]
+FilterOperatorType = Literal["eq", "ne", "lt", "le", "gt", "ge", "includes", "excludes"]
+
+EQ_TYPES = [(x,) for x in (str, int, float, bool, NoneType, datetime.datetime, datetime.date, datetime.timedelta)]
+CMP_TYPES = [(x,) for x in (int, float, datetime.datetime, datetime.date, datetime.timedelta)]
+IN_TYPES = [(iter_type, item_type) for iter_type in (list, tuple, set, frozenset) for (item_type,) in EQ_TYPES]
 
 
-@dataclasses.dataclass
-class FilterableAttribute:
+class FilterableAttribute(pydantic.BaseModel):
     name: str
-    annotation: str
+    typing: Any
+
+    @functools.cached_property
+    def root_adapter(self) -> pydantic.TypeAdapter:
+        root_types = {types_[0] for types_ in iter_typing_types(self.typing)}
+        return pydantic.TypeAdapter(Union[*root_types])
+
+    @functools.cached_property
+    def item_adapter(self) -> pydantic.TypeAdapter:
+        item_types = {types_[1] for types_ in iter_typing_types(self.typing) if types_ in IN_TYPES}
+        return pydantic.TypeAdapter(Union[*item_types])
 
     @property
     def operators(self) -> frozenset[FilterOperatorType]:
-        annotation = self.annotation
         ops = set()
 
-        if match := re.match(r"^ClassVar\[(.*)\]$", self.annotation):
-            annotation = match.group(1).strip()
+        for types_ in iter_typing_types(self.typing):
+            if types_ in EQ_TYPES:
+                ops |= {"eq", "ne"}
 
-        if match := re.match(r"^Optional\[(.*)\]$", annotation):
-            annotation = match.group(1).strip()
-        elif match := re.match(r"^(.*) \| None$", annotation):
-            annotation = match.group(1).strip()
+            if types_ in CMP_TYPES:
+                ops |= {"lt", "le", "gt", "ge"}
 
-        if annotation in ("str",):
-            ops |= {"eq", "ne"}
-        elif annotation in ("list[str]", "set[str]", "frozenset[str]"):
-            ops |= {"includes", "excludes"}
+            if types_ in IN_TYPES:
+                ops |= {"includes", "excludes"}
 
         return frozenset(ops)
 
-    def build_filter(self, operator: FilterOperatorType, value: Any) -> Callable[[Any], bool]:
+    def build_filter(self, operator: FilterOperatorType, value: str) -> Callable[[Any], bool]:
         if operator not in self.operators:
             raise ValueError("Operator is not supported for this attribute", self, operator, value)
 
         match operator:
             case "eq":
-                return lambda x: value == getattr(x, self.name)
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) == value
             case "ne":
-                return lambda x: value != getattr(x, self.name)
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) != value
+            case "lt":
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) < value
+            case "le":
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) <= value
+            case "gt":
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) > value
+            case "ge":
+                value = self.root_adapter.validate_python(value)
+                return lambda x: getattr(x, self.name) >= value
             case "includes":
+                value = self.item_adapter.validate_python(value)
                 return lambda x: value in (getattr(x, self.name) or [])
             case "excludes":
+                value = self.item_adapter.validate_python(value)
                 return lambda x: value not in (getattr(x, self.name) or [])
 
         raise ValueError("Unexpected operator", self, operator, value)
 
 
-@dataclasses.dataclass
-class FilterPart:
+class FilterPart(pydantic.BaseModel):
     name: str
     operator: FilterOperatorType
     value: str
@@ -69,29 +98,20 @@ class FilterableMixin(abc.ABC):
     def _get_filterable_attributes(cls) -> dict[str, FilterableAttribute]:
         attrs = {}
 
-        # get attributes form base classes
+        for klass in reversed(inspect.getmro(cls)):
+            # annotated class/instance variables
+            # - include_extras=True is required to keep Annotated data
 
-        for base in cls.__bases__:
-            if issubclass(base, FilterableMixin):
-                attrs |= base._get_filterable_attributes()
+            for name, typing_ in get_type_hints(klass, include_extras=True).items():
+                attrs[name] = FilterableAttribute(name=name, typing=typing_)
 
-        # annotated class/instance variables
+            # @property values
 
-        for name, type_ in cls.__dict__.get("__annotations__", {}).items():
-            if not name.startswith("_"):
-                attrs[name] = FilterableAttribute(name=name, annotation=type_)
-
-        # @property values
-
-        for name, value in cls.__dict__.items():
-            # noinspection PyUnresolvedReferences
-            if (
-                not name.startswith("_")
-                and isinstance(value, property)
-                and hasattr(value.fget, "__annotations__")
-                and "return" in value.fget.__annotations__
-            ):
-                attrs[name] = FilterableAttribute(name=name, annotation=value.fget.__annotations__["return"])
+            for name, value in klass.__dict__.items():
+                if not name.startswith("_") and isinstance(value, property):
+                    type_hints = get_type_hints(value.fget, include_extras=True)
+                    if "return" in type_hints:
+                        attrs[name] = FilterableAttribute(name=name, typing=type_hints["return"])
 
         # return only filterable types (only str types are supported)
 
@@ -116,7 +136,7 @@ class FilterableMixin(abc.ABC):
 
         for part in parts:
             if part.name not in attrs:
-                raise ValueError("Not filterable attribute", part, cls.__name__, attrs)
+                raise ValueError("Not filterable attribute", part, cls.__name__, [*attrs.values()])
             part_filters.append(attrs[part.name].build_filter(part.operator, part.value))
 
         return lambda x: all(part_filter(x) for part_filter in part_filters)
