@@ -37,6 +37,14 @@ class Storage(MetadataMixin):
     def files_path(self) -> pathlib.Path:
         return self.path
 
+    @property
+    def git_privacy(self) -> GitPrivacyType:
+        return self.metadata["git_privacy"]
+
+    @git_privacy.setter
+    def git_privacy(self, value: GitPrivacyType) -> None:
+        self.metadata = dict(self.metadata, git_privacy=value)
+
     @classmethod
     def build_metadata(cls, git_privacy: GitPrivacyType = "private", **kwargs) -> dict[str, Any]:
         return super().build_metadata(**kwargs) | {"version": __version__, "git_privacy": git_privacy}

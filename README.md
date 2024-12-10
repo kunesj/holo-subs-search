@@ -48,11 +48,10 @@ Uses:
 - (Optional) Fetch subtitles for membership videos. This requires you to have membership and be logged in your browser.
 
     ```bash
-    python3.11 -m holo_subs_search --video-filter
-flags:includes:youtube-membership --youtube-fetch-subtitles --youtube-memberships UCHsx4Hqa-1ORjQTh9TYDhww --youtube-cookies-from-browser chrome
+    python3.11 -m holo_subs_search --video-filter flags:includes:youtube-membership --youtube-fetch-subtitles --youtube-memberships UCHsx4Hqa-1ORjQTh9TYDhww --youtube-cookies-from-browser chrome
     ```
 
-  Membership videos automatically create `.gitignore` files that exclude fetched subtitles from git, so that the storage directory can be a git repo.
+  If you plan to commit your data to public git repo, run `python3.11 -m holo_subs_search --storage-git-privacy public` to automatically create `.gitignore` files that will exclude all membership content from git.
 
 
 - Search

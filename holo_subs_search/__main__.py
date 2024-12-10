@@ -91,6 +91,14 @@ def main() -> None:
         default=DEFAULT_STORAGE_PATH,
     )
     parser.add_argument(
+        "--storage-git-privacy",
+        choices=["private", "public"],
+        default=None,
+        help="Sets storage to specified privacy level. "
+        "Storage with 'public' privacy level will automatically create `.gitignore` "
+        "files that will exclude membership content from git.",
+    )
+    parser.add_argument(
         "-d",
         "--debug",
         type=int,
@@ -258,6 +266,12 @@ def main() -> None:
     storage_path = pathlib.Path(args.storage)
     _logger.info("Storage: %s", storage_path)
     storage = Storage(path=storage_path)
+
+    if git_privacy := args.storage_git_privacy:
+        _logger.info("Setting storage git privacy to: %s", git_privacy)
+        storage.git_privacy = git_privacy
+        for video in storage.list_videos():
+            video.update_gitignore()
 
     # build filters
 
