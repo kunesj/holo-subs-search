@@ -166,9 +166,11 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     def update_gitignore(self) -> None:
         gitignore_path = self.record_path / ".gitignore"
-        if Flags.YOUTUBE_MEMBERSHIP in self.flags and not gitignore_path.exists():
+        is_ignored = self.storage.git_privacy == "public" and Flags.YOUTUBE_MEMBERSHIP in self.flags
+
+        if is_ignored and not gitignore_path.exists():
             gitignore_path.write_text("/content\n")
-        elif Flags.YOUTUBE_MEMBERSHIP not in self.flags and gitignore_path.exists():
+        elif not is_ignored and gitignore_path.exists():
             gitignore_path.unlink()
 
     # Youtube
