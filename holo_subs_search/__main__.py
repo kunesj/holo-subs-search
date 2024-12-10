@@ -214,7 +214,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--whisper-model",
-        default=transcription.CRISPER_WHISPER_MODEL,
+        default=transcription.model_size_and_audio_lang_to_model(model_size="large", audio_lang=None),
         help=(
             "Name of specific Whisper model to load. "
             "Use HuggingFace model names with OpenAI-compatible API, or `whisper-1` with official OpenAI API."
