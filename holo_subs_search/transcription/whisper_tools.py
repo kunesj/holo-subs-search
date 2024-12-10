@@ -144,11 +144,15 @@ def transcribe_diarized_audio(
         return tx
 
     for idx, chunk in enumerate(chunks):
-        if idx != 0 and idx % 100 == 0:
-            _logger.info("Progress: %r/%r", idx + 1, len(chunks))
+        if _logger.getEffectiveLevel() > logging.DEBUG:
+            _logger.info("Chunk: %r/%r", idx + 1, len(chunks))
+        else:
+            _logger.debug("Chunk: %r/%r: %r", idx + 1, len(chunks), chunk)
 
-        _logger.info("Chunk: %r", chunk)
-        chunk_txs.append(_transcribe_chunk(chunk))
+        tx = _transcribe_chunk(chunk)
+        _logger.debug("Transcription: %r/%r: %r", idx + 1, len(chunks), tx)
+
+        chunk_txs.append(tx)
 
     _logger.info("Progress: DONE")
 
@@ -165,7 +169,7 @@ def transcribe_diarized_audio(
 def transcriptions_to_langs(
     txs: list[Transcription], *, min_occurrence: float = 0.1, default_lang: str = "en"
 ) -> tuple[str, set[str], dict[str, int]]:
-    _langs = [tx.lang for tx in txs]
+    _langs = [tx.lang for tx in txs if tx.segments]
     lang_counts = {_lang: _langs.count(_lang) for _lang in set(_langs)}
 
     if lang_counts:

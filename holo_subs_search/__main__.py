@@ -249,6 +249,10 @@ def main() -> None:
     logger = logging.getLogger()
     logger.setLevel(args.debug)
 
+    logging.getLogger("openai").setLevel(logging.ERROR)
+    logging.getLogger("httpx").setLevel(logging.ERROR)
+    logging.getLogger("httpcore").setLevel(logging.INFO)
+
     # storage
 
     storage_path = pathlib.Path(args.storage)
