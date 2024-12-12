@@ -60,6 +60,7 @@ class Storage(MetadataMixin):
             self.metadata = migrations.migrate_0_1_0(self.path, self.metadata)
             self.metadata = migrations.migrate_0_2_0(self.path, self.metadata)
             self.metadata = migrations.migrate_0_3_0(self.path, self.metadata)
+            self.metadata = migrations.migrate_0_4_0(self.path, self.metadata)
 
             if version == self.metadata["version"]:
                 break

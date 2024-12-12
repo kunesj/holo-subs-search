@@ -281,6 +281,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                         metadata = SubtitleItem.build_metadata(
                             source="youtube",
                             lang=lang,
+                            langs={lang},
                             flags=flags,
                             subtitle_file=name,
                         )

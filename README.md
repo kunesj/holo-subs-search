@@ -59,7 +59,7 @@ Uses:
     ```bash
     python3.11 -m holo_subs_search --search "solo live"
     python3.11 -m holo_subs_search --search "solo.*?live" --search-regex
-    python3.11 -m holo_subs_search --search "solo live" --search-subtitle-filter source:eq:youtube lang:eq:en
+    python3.11 -m holo_subs_search --search "solo live" --search-subtitle-filter source:eq:youtube langs:includes:en
     ```
 
 

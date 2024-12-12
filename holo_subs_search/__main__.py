@@ -246,8 +246,8 @@ def main() -> None:
         "--search-subtitle-filter",
         nargs="+",
         type=str,
-        default=["lang:eq:en"],
-        help="`--search-subtitle-filter source:eq:youtube lang:eq:en`",
+        default=["langs:includes:en"],
+        help="`--search-subtitle-filter source:eq:youtube langs:includes:en`",
     )
     args = parser.parse_args()
 

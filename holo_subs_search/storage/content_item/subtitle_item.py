@@ -23,6 +23,11 @@ class SubtitleItem(BaseItem):
         return self.metadata["lang"]
 
     @property
+    def langs(self) -> frozenset[str]:
+        """All languages contained in the file"""
+        return frozenset(self.metadata["langs"])
+
+    @property
     def subtitle_file(self) -> str:
         return self.metadata["subtitle_file"]
 
@@ -52,6 +57,7 @@ class SubtitleItem(BaseItem):
         *,
         source: str,
         lang: str,
+        langs: set[str],
         subtitle_file: str,
         audio_id: str | None = None,
         diarization_id: str | None = None,
@@ -61,6 +67,7 @@ class SubtitleItem(BaseItem):
         return super().build_metadata(**kwargs) | {
             "source": source,
             "lang": lang,
+            "langs": langs,
             "subtitle_file": subtitle_file,
             "audio_id": audio_id,
             "diarization_id": diarization_id,
