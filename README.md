@@ -97,6 +97,8 @@ Detecting which parts of the audio file contain speech, is needed to prevent hal
     python3.11 -m holo_subs_search --pyannote-diarize-audio --huggingface-token "abcdefgh"
     ```
 
+Note: This step took 162 seconds for 2 hours long video on `Nvidia RTX 3090`.
+
 
 ### Transcribe Audio
 
@@ -110,17 +112,20 @@ Detecting which parts of the audio file contain speech, is needed to prevent hal
 
 - Transcribe the audio files into subtitles
     ```bash
-    python3.11 -m holo_subs_search --whisper-transcribe-audio
+    python3.11 -m holo_subs_search --whisper-transcribe-audio --whisper-langs multi
     ```
+  
+    This will try to automatically detect the language of audio segments, so the resulting transcription might contain multiple languages.  
+    
+    Translations to specific language can be created with `--whisper-langs en`, but the results are not that good, so it's not recommended. But, you can also use this parameter if Whisper is incorrectly detecting the language.
 
-    For example, transcription of 3.5 hours long video on `Nvidia RTX 3090` took:
-    - 8 minutes with `nyrahealth/faster_CrisperWhisper` (default model)
-    - 2 minutes with `Systran/faster-whisper-tiny`
 
 - Search transcribed audio
     ```bash
     python3.11 -m holo_subs_search --search "solo live" --search-subtitle-filter source:eq:whisper
     ```
+
+Note: This step took 474 seconds for 2 hours long video with mostly speech, using `Systran/faster-whisper-large-v3` model on `Nvidia RTX 3090`.
 
 
 ## Processed Data

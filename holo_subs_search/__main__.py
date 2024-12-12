@@ -232,7 +232,7 @@ def main() -> None:
         "--whisper-langs",
         nargs="+",
         type=str,
-        default=["en"],
+        default=[MULTI_LANG],
         help=(
             f"`--whisper-langs en ja id {MULTI_LANG}`\n"
             f"- {MULTI_LANG!r} lets whisper automatically detect language of audio chunks, "
@@ -332,7 +332,8 @@ def main() -> None:
             video.update_gitignore()
 
     # process video
-    # TODO: run every step in separate thread to allow starting work on second video while first still has steps to do
+    # TODO: queue every step in separate thread to allow starting download/diarization/transcription of next video
+    #  while first one is not finished
 
     for video in storage.list_videos(video_filter):
         # fetching YouTube content
