@@ -45,7 +45,7 @@ def diarization_to_voice_activity(
     min_duration: float = 0.1,
     max_duration: float = 30.0,
     max_gap: float = 3.0,
-) -> list[VoiceActivityChunk]:
+) -> tuple[list[VoiceActivityChunk], dict]:
     """
     - overlapping diarization segments must be merged
 
@@ -56,7 +56,6 @@ def diarization_to_voice_activity(
     - there should be a very tiny silent gap before and after speech, to have some buffer in case of timestamp errors
     - very tiny segments should be excluded, as they shouldn't contain any real words (?)
     """
-    max_duration -= 2 * padding
     if max_gap < padding:
         raise ValueError("max_gap must be larger than padding")
 
@@ -66,7 +65,7 @@ def diarization_to_voice_activity(
     chunks = _merge_overlapping_chunks(chunks)
 
     # merge close chunks
-    chunks = _merge_close_chunks(chunks, max_duration=max_duration, max_gap=max_gap)
+    chunks = _merge_close_chunks(chunks, max_duration=max_duration - 2 * padding, max_gap=max_gap)
 
     # exclude tiny chunks that probably don't contain any speech
     chunks = [x for x in chunks if x.duration >= min_duration]
@@ -74,7 +73,12 @@ def diarization_to_voice_activity(
     # add padding to chunks
     chunks = _pad_chunks(chunks, padding=padding)
 
-    return chunks
+    return chunks, {
+        "padding": padding,
+        "min_duration": min_duration,
+        "max_duration": max_duration,
+        "max_gap": max_gap,
+    }
 
 
 def _merge_overlapping_chunks(chunks: list[VoiceActivityChunk]) -> list[VoiceActivityChunk]:

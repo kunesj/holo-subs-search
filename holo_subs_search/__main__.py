@@ -11,7 +11,7 @@ import termcolor
 
 from . import diarization, holodex_tools, transcription
 from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
-from .storage.content_item import AudioItem, SubtitleItem
+from .storage.content_item import MULTI_LANG, AudioItem, SubtitleItem
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))
@@ -32,9 +32,8 @@ def _search_video_subtitles(
         subtitle_filter = SubtitleItem.build_filter()
 
     for video in storage.list_videos(video_filter):
-        for item in video.list_content(lambda x: subtitle_filter(x) and x.subtitle_file.endswith(".srt")):
-            content = item.subtitle_path.read_text()
-            tx = transcription.Transcription.from_srt(content, lang=item.lang)
+        for item in video.list_content(subtitle_filter):
+            tx = item.load_transcription()
             searchable = transcription.SearchableTranscription.from_transcription(tx)
 
             header_printed = False
@@ -45,7 +44,8 @@ def _search_video_subtitles(
                     parts = [
                         video.published_at.strftime("%Y-%m-%d") if video.published_at else None,
                         video.id,
-                        tx.lang,
+                        item.content_id,
+                        ",".join(tx.get_main_langs()),
                     ]
 
                     if Flags.YOUTUBE_MEMBERSHIP in video.flags:
@@ -229,6 +229,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--whisper-langs",
+        nargs="+",
+        type=str,
+        default=["en"],
+        help=(
+            f"`--whisper-langs en ja id {MULTI_LANG}`\n"
+            f"- {MULTI_LANG!r} lets whisper automatically detect language of audio chunks, "
+            f"the output will contain multiple languages.\n"
+            "- Other values will transcribe+translate audio to specified language."
+        ),
+    )
+    parser.add_argument(
         "--whisper-force",
         action="store_true",
         help="Don't skip already processed items",
@@ -353,6 +365,7 @@ def main() -> None:
                 api_base_url=args.whisper_api_base_url,
                 api_key=args.whisper_api_key,
                 model=args.whisper_model,
+                langs=args.whisper_langs,
                 force=args.whisper_force,
             )
 

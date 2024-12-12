@@ -12,7 +12,7 @@ from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoI
 
 from .. import diarization, transcription, ydl_tools
 from ..utils import AwareDateTime, get_checksum, json_dumps
-from .content_item import AudioItem, DiarizationItem, SubtitleItem
+from .content_item import MULTI_LANG, AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
 from .mixins.filterable_mixin import FilterPart
 from .mixins.flags_mixin import Flags, FlagsMixin
@@ -423,6 +423,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         api_base_url: str,
         api_key: str,
         model: str,
+        langs: set[str],  # can have special MULTI_LANG value
         force: bool = False,
     ) -> None:
         _logger.debug("Transcribing audio for video %s - %s", self.id, self.published_at)
@@ -433,80 +434,108 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                     FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
                 )
             ):
-                # check for existing results
-
-                sub_items = list(
-                    self.list_content(
-                        SubtitleItem.build_filter(
-                            FilterPart(name="source", operator="eq", value="whisper"),
-                            FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
-                            FilterPart(name="diarization_id", operator="eq", value=diarization_item.content_id),
-                            FilterPart(name="whisper_model", operator="eq", value=model),
-                        )
+                for lang in langs:
+                    self._whisper_transcribe_audio_to_lang(
+                        api_base_url=api_base_url,
+                        api_key=api_key,
+                        model=model,
+                        lang=lang,
+                        audio_item=audio_item,
+                        diarization_item=diarization_item,
+                        force=force,
                     )
-                )
 
-                if sub_items and not force:
-                    continue
+    def _whisper_transcribe_audio_to_lang(
+        self,
+        *,
+        api_base_url: str,
+        api_key: str,
+        model: str,
+        lang: str,  # can have special MULTI_LANG value
+        audio_item: AudioItem,
+        diarization_item: DiarizationItem,
+        force: bool = False,
+    ) -> None:
+        """
+        Note: Setting `lang` will switch whisper to translation mode.
+        """
+        # check for existing results
 
-                for sub_item in sub_items:
-                    sub_item.path.unlink()
+        filter_parts = [
+            FilterPart(name="source", operator="eq", value="whisper"),
+            FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
+            FilterPart(name="diarization_id", operator="eq", value=diarization_item.content_id),
+            FilterPart(name="whisper_model", operator="eq", value=model),
+            FilterPart(name="lang", operator="eq", value=lang),
+        ]
 
-                # transcribe the audio into SRT format
+        sub_items = list(self.list_content(SubtitleItem.build_filter(*filter_parts)))
+        if sub_items and not force:
+            return
 
-                _logger.info(
-                    "Starting transcription: video_id=%r, audio_id=%r, diarization_id=%s, whisper_model=%r",
-                    self.id,
+        for sub_item in sub_items:
+            sub_item.path.unlink()
+
+        # transcribe the audio into SRT format
+
+        _logger.info(
+            "Starting transcription: video_id=%r, audio_id=%r, diarization_id=%s, whisper_model=%r, lang=%r",
+            self.id,
+            audio_item.content_id,
+            diarization_item.content_id,
+            model,
+            lang,
+        )
+        start_time = time.time()
+
+        tx = transcription.transcribe_diarized_audio(
+            file=audio_item.audio_path,
+            dia=diarization_item.diarization,
+            api_base_url=api_base_url,
+            api_key=api_key,
+            model=model,
+            lang=None if lang == MULTI_LANG else lang,
+        )
+        content = tx.model_dump_json()
+
+        end_time = time.time()
+        _logger.info("Transcription finished in %i seconds: %s", end_time - start_time, tx.get_lang_counts())
+
+        # save subtitle file
+        # - keeps transcriptions from different models and for different languages
+
+        checksum = get_checksum(
+            str(
+                [
                     audio_item.content_id,
                     diarization_item.content_id,
                     model,
-                )
-                start_time = time.time()
+                    content,
+                ]
+            ).encode("utf-8")
+        )
 
-                tx = transcription.transcribe_diarized_audio(
-                    file=audio_item.audio_path,
-                    dia=diarization_item.diarization,
-                    api_base_url=api_base_url,
-                    api_key=api_key,
-                    model=model,
-                )
-                lang = tx.lang
-                content = tx.to_srt()
+        name = f"transcription.{lang}.json"
+        content_id = SubtitleItem.build_content_id("whisper", checksum, name)
+        item = SubtitleItem(path=self.content_path / content_id)
 
-                end_time = time.time()
-                _logger.info("Transcription finished in %i seconds", end_time - start_time)
+        flags = {Flags.SUBTITLE_TRANSCRIPTION}
+        if lang != MULTI_LANG:
+            flags.add(Flags.SUBTITLE_TRANSLATION)
 
-                # save subtitle file
-                # - keeps transcriptions from different models and for different languages
+        metadata = SubtitleItem.build_metadata(
+            source="whisper",
+            lang=lang,
+            langs=tx.get_main_langs(),
+            flags=flags,
+            subtitle_file=name,
+            audio_id=audio_item.content_id,
+            diarization_id=diarization_item.content_id,
+            whisper_model=model,
+        )
 
-                checksum = get_checksum(
-                    str(
-                        [
-                            audio_item.content_id,
-                            diarization_item.content_id,
-                            model,
-                            lang,
-                            content,
-                        ]
-                    ).encode("utf-8")
-                )
-
-                name = f"transcription.{lang}.srt"
-                content_id = SubtitleItem.build_content_id("whisper", checksum, name)
-                item = SubtitleItem(path=self.content_path / content_id)
-
-                metadata = SubtitleItem.build_metadata(
-                    source="whisper",
-                    lang=lang,
-                    flags={Flags.SUBTITLE_TRANSCRIPTION},
-                    subtitle_file=name,
-                    audio_id=audio_item.content_id,
-                    diarization_id=diarization_item.content_id,
-                    whisper_model=model,
-                )
-
-                item.create(metadata)
-                item.subtitle_path.write_text(content)
+        item.create(metadata)
+        item.subtitle_path.write_text(content)
 
 
 # Following imports must be at the end of file to prevent cyclic import error

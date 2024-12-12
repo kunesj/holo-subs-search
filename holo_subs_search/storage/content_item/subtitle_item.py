@@ -4,9 +4,12 @@ import logging
 import pathlib
 from typing import Any
 
+from ...transcription import Transcription
 from .base_item import BaseItem
 
 _logger = logging.getLogger(__name__)
+# Special lang value that should be used for subtitles containing multiple languages
+MULTI_LANG = "multi"
 
 
 class SubtitleItem(BaseItem):
@@ -20,6 +23,7 @@ class SubtitleItem(BaseItem):
 
     @property
     def lang(self) -> str:
+        """Main language of the file. Can be MULTI_LANG."""
         return self.metadata["lang"]
 
     @property
@@ -34,6 +38,16 @@ class SubtitleItem(BaseItem):
     @property
     def subtitle_path(self) -> pathlib.Path:
         return self.files_path / self.subtitle_file
+
+    def load_transcription(self) -> Transcription:
+        content = self.subtitle_path.read_text()
+
+        if self.subtitle_file.endswith(".srt"):
+            return Transcription.from_srt(content, lang=self.lang)
+        elif self.subtitle_file.endswith(".json"):
+            return Transcription.model_validate_json(content)
+
+        raise ValueError("File is not compatible", self.subtitle_file)
 
     # Transcription properties
 

@@ -75,6 +75,7 @@ def transcribe_diarized_audio(
     api_base_url: str,
     api_key: str,
     model: str,
+    lang: str | None = None,
     prompt: str | None = None,
     temperature: float | None = None,
     timeout: str | None = None,
@@ -82,7 +83,7 @@ def transcribe_diarized_audio(
     # calculate chunks
 
     _logger.info("Converting diarization to voice activity...")
-    chunks = diarization_to_voice_activity(dia)
+    chunks, dia2va_params = diarization_to_voice_activity(dia)
 
     # prepare audio
 
@@ -117,39 +118,22 @@ def transcribe_diarized_audio(
         return tx
 
     for idx, chunk in enumerate(chunks):
-        if _logger.getEffectiveLevel() > logging.DEBUG:
-            _logger.info("Chunk: %r/%r", idx + 1, len(chunks))
-        else:
-            _logger.debug("Chunk: %r/%r: %r", idx + 1, len(chunks), chunk)
-
-        tx = _transcribe_chunk(chunk)
-        _logger.debug("Transcription: %r/%r: %r", idx + 1, len(chunks), tx)
+        _logger.info("Chunk %r/%r: %r", idx + 1, len(chunks), chunk)
+        tx = _transcribe_chunk(chunk, lang=lang)
+        _logger.debug("Transcription %r/%r: %r", idx + 1, len(chunks), tx)
 
         chunk_txs.append(tx)
 
     _logger.info("Progress: DONE")
 
-    # compute language
-
-    lang, main_langs, lang_counts = transcriptions_to_langs(chunk_txs)
-    _logger.info("Detected language: primary=%r, main=%r, counts=%r", lang, main_langs, lang_counts)
-
     # build transcription object and return
 
-    return Transcription(lang=lang, segments=list(itertools.chain.from_iterable([tx.segments for tx in chunk_txs])))
-
-
-def transcriptions_to_langs(
-    txs: list[Transcription], *, min_occurrence: float = 0.1, default_lang: str = "en"
-) -> tuple[str, set[str], dict[str, int]]:
-    _langs = [tx.lang for tx in txs if tx.segments]
-    lang_counts = {_lang: _langs.count(_lang) for _lang in set(_langs)}
-
-    if lang_counts:
-        lang = max(lang_counts.keys(), key=lambda key: lang_counts[key])
-        main_langs = {_lang for _lang, _count in lang_counts.items() if _count >= (len(txs) * min_occurrence)}
-    else:
-        lang = default_lang
-        main_langs = {lang}
-
-    return lang, main_langs, lang_counts
+    segments = list(itertools.chain.from_iterable([tx.segments for tx in chunk_txs]))
+    params = {
+        "dia2va": dia2va_params,
+        "model": model,
+        "lang": lang,
+        "prompt": prompt,
+        "temperature": temperature,
+    }
+    return Transcription(segments=segments, params={k: v for k, v in params.items() if v is not None})
