@@ -5,6 +5,7 @@ import datetime
 import logging
 import os
 import pathlib
+import shutil
 from typing import Callable
 
 import termcolor
@@ -377,7 +378,7 @@ def main() -> None:
                 AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube"))
             ):
                 _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
-                audio_item.unlink()
+                shutil.rmtree(audio_item.path)
 
     # searching parsed subtitles
 
