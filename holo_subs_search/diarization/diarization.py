@@ -23,6 +23,7 @@ class Diarization(BaseModel):
     model_config = _config
 
     diarization_model: str
+    # VERY IMPORTANT: diarization segments can overlap
     diarization: list[DiarizationSegment]
     embedding_model: str
     embeddings: dict[str, list[float]]

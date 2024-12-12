@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import io
 import itertools
 import logging
@@ -10,9 +9,9 @@ from typing import TYPE_CHECKING
 import openai
 import openai.types.audio
 import pydub
-from pydantic import BaseModel, ConfigDict, computed_field, model_validator
 
 from .transcription import Transcription
+from .voice_activity import VoiceActivityChunk, diarization_to_voice_activity
 
 if TYPE_CHECKING:
     from ..diarization import Diarization
@@ -21,32 +20,6 @@ _logger = logging.getLogger(__name__)
 
 # Audio formats that are supported by Whisper
 WHISPER_AUDIO_FORMATS = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
-
-
-class AudioChunk(BaseModel):
-    model_config = ConfigDict(
-        validate_assignment=True,
-        validate_default=True,
-        validate_return=True,
-        arbitrary_types_allowed=True,
-        extra="forbid",
-        frozen=True,
-    )
-
-    start: float
-    end: float
-    speakers: frozenset[str]
-
-    @model_validator(mode="after")
-    def _check_start_end(self) -> AudioChunk:
-        if self.start >= self.end:
-            raise ValueError("AudioChunk start must be before end", self.start, self.end)
-        return self
-
-    @computed_field
-    @functools.cached_property
-    def duration(self) -> float:
-        return self.end - self.start
 
 
 def transcribe_audio(
@@ -106,22 +79,22 @@ def transcribe_diarized_audio(
     temperature: float | None = None,
     timeout: str | None = None,
 ) -> Transcription:
+    # calculate chunks
+
+    _logger.info("Converting diarization to voice activity...")
+    chunks = diarization_to_voice_activity(dia)
+
     # prepare audio
 
     _logger.info("Loading audio into pydub.AudioSegment...")
     audio = pydub.AudioSegment.from_file(file)
-
-    # calculate chunks
-
-    _logger.info("Calculating audio chunks...")
-    chunks = diarization_to_audio_chunks(dia)
 
     # transcribe chunks
 
     _logger.info("Transcribing %r audio chunks...", len(chunks))
     chunk_txs = []
 
-    def _transcribe_chunk(chunk: AudioChunk, lang: str | None = None) -> Transcription:
+    def _transcribe_chunk(chunk: VoiceActivityChunk, lang: str | None = None) -> Transcription:
         file_segment = io.BytesIO()
         audio[chunk.start * 1000 : chunk.end * 1000].export(file_segment, format="wav")
 
@@ -180,76 +153,3 @@ def transcriptions_to_langs(
         main_langs = {lang}
 
     return lang, main_langs, lang_counts
-
-
-def diarization_to_audio_chunks(
-    dia: Diarization,
-    *,
-    padding: float = 0.2,
-    min_duration: float = 0.1,
-    max_duration: float = 30.0,
-    max_gap: float = 2.0,
-) -> list[AudioChunk]:
-    """
-    - silent time must be excluded
-    - close chunks should be merged to make the transcription flow better. Maybe only chunks for the same speaker.
-    - chunks should not be longer than 30s, because that's internal chunk size of whisper.
-    - there should be a very tiny silent gap before and after speech, to have some buffer in case of timestamp errors
-    - very tiny segments should be excluded, as they shouldn't contain any real words
-    """
-    results = [AudioChunk(start=x.start, end=x.end, speakers={x.speaker}) for x in dia.diarization]
-
-    # merge close chunks
-    results = merge_audio_chunks(results, max_duration=max_duration, max_gap=max_gap)
-    # exclude tiny chunks
-    results = [x for x in results if x.duration >= min_duration]
-
-    return results
-
-
-def merge_audio_chunks(
-    chunks: list[AudioChunk],
-    *,
-    max_duration: float,
-    max_gap: float,
-) -> list[AudioChunk]:
-    """
-    Merges close chunks.
-    - starts merging from the smallest gaps first
-    """
-    results = [*chunks]
-
-    def _get_gap_and_duration(idx) -> tuple[float, float]:
-        return (
-            results[idx + 1].start - results[idx].end,
-            results[idx].duration + results[idx + 1].duration,
-        )
-
-    gaps_and_durations = [_get_gap_and_duration(idx) for idx in range(len(results) - 1)]
-    while len(results) >= 2:
-        if filtered := [x for x in gaps_and_durations if (x[0] <= max_gap and x[1] <= max_duration)]:
-            merge_gap_and_duration = min(filtered, key=lambda x: x[0])
-            merge_idx = gaps_and_durations.index(merge_gap_and_duration)
-        else:
-            break
-
-        results[merge_idx : merge_idx + 2] = [
-            AudioChunk(
-                start=results[merge_idx].start,
-                end=results[merge_idx + 1].end,
-                speakers=results[merge_idx].speakers | results[merge_idx + 1].speakers,
-            )
-        ]
-
-        if merge_idx - 1 >= 0:
-            gaps_and_durations[merge_idx - 1] = _get_gap_and_duration(merge_idx - 1)
-
-        if merge_idx < len(gaps_and_durations) - 1:
-            gaps_and_durations[merge_idx : merge_idx + 2] = [_get_gap_and_duration(merge_idx)]
-        else:
-            gaps_and_durations[merge_idx : merge_idx + 2] = []
-
-        if merge_idx + 1 < len(gaps_and_durations) - 1:
-            gaps_and_durations[merge_idx + 1] = _get_gap_and_duration(merge_idx + 1)
-
-    return results
