@@ -201,7 +201,13 @@ async def diarization(
                 # embedding generation usually fails for tiny segments
                 continue
 
-            waveform, sample_rate = audio.crop(wav_stream, pyannote.core.Segment(segment.start, segment.end))
+            waveform, sample_rate = audio.crop(
+                # some diarization segments might incorrectly end tiny bit AFTER the end of audio,
+                # so we use mode="pad" to fill the missing time with zeros
+                wav_stream,
+                pyannote.core.Segment(segment.start, segment.end),
+                mode="pad",
+            )
             embedding = embedding_pipeline(waveform[None]).flatten()
 
             if numpy.any(numpy.isnan(embedding)):
