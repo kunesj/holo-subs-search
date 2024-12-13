@@ -22,8 +22,17 @@ class DiarizationSegment(BaseModel):
 class Diarization(BaseModel):
     model_config = _config
 
-    diarization_model: str
-    # VERY IMPORTANT: diarization segments can overlap
-    diarization: list[DiarizationSegment]
-    embedding_model: str
+    # configuration
+
+    checkpoint: str  # E.g.: pyannote/speaker-diarization-3.1
+    segmentation_model: str | None
+    segmentation_batch_size: int
+    embedding_model: str | None
+    embedding_batch_size: int
+    embedding_exclude_overlap: bool
+    clustering: str
+
+    # result
+
+    segments: list[DiarizationSegment]  # VERY IMPORTANT: segments can overlap
     embeddings: dict[str, list[float]]

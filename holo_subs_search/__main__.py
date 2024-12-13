@@ -195,12 +195,8 @@ def main() -> None:
         help="Url of pyannote-server API",
     )
     parser.add_argument(
-        "--pyannote-diarization-model",
-        default=diarization.DIARIZATION_MODEL,
-    )
-    parser.add_argument(
-        "--pyannote-embedding-model",
-        default=diarization.EMBEDDING_MODEL,
+        "--pyannote-checkpoint",
+        default=diarization.DIARIZATION_CHECKPOINT,
     )
     parser.add_argument(
         "--pyannote-force",
@@ -335,6 +331,8 @@ def main() -> None:
     # process video
     # TODO: queue every step in separate thread to allow starting download/diarization/transcription of next video
     #  while first one is not finished
+    # TODO: maybe check whisperX for VA or improvements. But don't use it by itself.
+    #   - https://github.com/m-bain/whisperX/blob/main/whisperx/vad.py
 
     for video in storage.list_videos(video_filter):
         # fetching YouTube content
@@ -354,8 +352,7 @@ def main() -> None:
         if args.pyannote_diarize_audio:
             video.pyannote_diarize_audio(
                 api_base_url=args.pyannote_api_base_url,
-                diarization_model=args.pyannote_diarization_model,
-                embedding_model=args.pyannote_embedding_model,
+                checkpoint=args.pyannote_checkpoint,
                 huggingface_token=args.huggingface_token,
                 force=args.pyannote_force,
             )

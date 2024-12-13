@@ -343,8 +343,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         self,
         *,
         api_base_url: str,
-        diarization_model: str,
-        embedding_model: str,
+        checkpoint: str,
         huggingface_token: str | None = None,
         force: bool = False,
     ) -> None:
@@ -358,8 +357,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                     DiarizationItem.build_filter(
                         FilterPart(name="source", operator="eq", value="pyannote"),
                         FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
-                        FilterPart(name="diarization_model", operator="eq", value=diarization_model),
-                        FilterPart(name="embedding_model", operator="eq", value=embedding_model),
+                        FilterPart(name="checkpoint", operator="eq", value=checkpoint),
                     )
                 )
             )
@@ -373,19 +371,17 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             # diarize audio
 
             _logger.info(
-                "Starting diarization: video_id=%r, audio_id=%r, diarization_model=%s, embedding_model=%r",
+                "Starting diarization: video_id=%r, audio_id=%r, checkpoint=%s",
                 self.id,
                 audio_item.content_id,
-                diarization_model,
-                embedding_model,
+                checkpoint,
             )
 
             start_time = time.time()
             dia = diarization.audio_to_diarization_response(
                 path=audio_item.audio_path,
                 api_base_url=api_base_url,
-                diarization_model=diarization_model,
-                embedding_model=embedding_model,
+                checkpoint=checkpoint,
                 huggingface_token=huggingface_token,
             )
             end_time = time.time()
@@ -394,17 +390,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
             # save diarization file
 
-            checksum = get_checksum(
-                str(
-                    [
-                        audio_item.content_id,
-                        dia.diarization_model,
-                        dia.embedding_model,
-                        json.dumps(dia.model_dump(mode="json"), sort_keys=True),
-                    ]
-                ).encode("utf-8")
-            )
-
+            checksum = get_checksum(json.dumps(dia.model_dump(mode="json"), sort_keys=True).encode("utf-8"))
             content_id = DiarizationItem.build_content_id("pyannote", checksum)
             item = DiarizationItem(path=self.content_path / content_id)
 
@@ -413,7 +399,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 audio_id=audio_item.content_id,
             )
             item.create(metadata)
-            item.diarization = dia
+            item.save_diarization(dia)
 
     # Whisper
 
@@ -490,7 +476,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
         tx = transcription.transcribe_diarized_audio(
             file=audio_item.audio_path,
-            dia=diarization_item.diarization,
+            dia=diarization_item.load_diarization(),
             api_base_url=api_base_url,
             api_key=api_key,
             model=model,

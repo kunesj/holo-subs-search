@@ -8,16 +8,33 @@ import requests
 
 from .diarization import Diarization
 
-DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
-EMBEDDING_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
+DIARIZATION_CHECKPOINT = "pyannote/speaker-diarization-3.1"
+# - developed on 84fd25912480287da0247647c3d2b4853cb3ee5d
+# - This just loads following config in pyannote:
+#     pipeline:
+#       name: pyannote.audio.pipelines.SpeakerDiarization
+#       params:
+#         clustering: AgglomerativeClustering
+#         embedding: pyannote/wespeaker-voxceleb-resnet34-LM
+#         embedding_batch_size: 32
+#         embedding_exclude_overlap: true
+#         segmentation: pyannote/segmentation-3.0
+#         segmentation_batch_size: 32
+#
+#     params:
+#       clustering:
+#         method: centroid
+#         min_cluster_size: 12
+#         threshold: 0.7045654963945799
+#       segmentation:
+#         min_duration_off: 0.0
 
 
 def audio_to_diarization_response(
     path: pathlib.Path,
     *,
     api_base_url: str,
-    diarization_model: str,
-    embedding_model: str,
+    checkpoint: str,
     huggingface_token: str | None = None,
     timeout: float | None = None,
 ) -> Diarization:
@@ -25,8 +42,7 @@ def audio_to_diarization_response(
     - Supports any format ffmpeg supports
     """
     params = {
-        "diarization_model": diarization_model,
-        "embedding_model": embedding_model,
+        "checkpoint": checkpoint,
         "huggingface_token": huggingface_token,
     }
     params = {k: v for k, v in params.items() if v is not None}

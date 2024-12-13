@@ -39,4 +39,4 @@ def _migrate_0_4_0__video(video_p: pathlib.Path) -> None:
                     metadata = json.loads(item_metadata_p.read_text())
                     if metadata.get("item_type") == "subtitle":
                         metadata["langs"] = [metadata["lang"]]
-                    item_metadata_p.write_text(json.dumps(metadata, sort_keys=True))
+                        item_metadata_p.write_text(json.dumps(metadata, sort_keys=True))

@@ -39,16 +39,6 @@ class SubtitleItem(BaseItem):
     def subtitle_path(self) -> pathlib.Path:
         return self.files_path / self.subtitle_file
 
-    def load_transcription(self) -> Transcription:
-        content = self.subtitle_path.read_text()
-
-        if self.subtitle_file.endswith(".srt"):
-            return Transcription.from_srt(content, lang=self.lang)
-        elif self.subtitle_file.endswith(".json"):
-            return Transcription.model_validate_json(content)
-
-        raise ValueError("File is not compatible", self.subtitle_file)
-
     # Transcription properties
 
     @property
@@ -87,3 +77,13 @@ class SubtitleItem(BaseItem):
             "diarization_id": diarization_id,
             "whisper_model": whisper_model,
         }
+
+    def load_transcription(self) -> Transcription:
+        content = self.subtitle_path.read_text()
+
+        if self.subtitle_file.endswith(".srt"):
+            return Transcription.from_srt(content, lang=self.lang)
+        elif self.subtitle_file.endswith(".json"):
+            return Transcription.model_validate_json(content)
+
+        raise ValueError("File is not compatible", self.subtitle_file)

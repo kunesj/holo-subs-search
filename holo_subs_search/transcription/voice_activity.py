@@ -59,7 +59,7 @@ def diarization_to_voice_activity(
     if max_gap < padding:
         raise ValueError("max_gap must be larger than padding")
 
-    chunks = [VoiceActivityChunk(start=x.start, end=x.end) for x in dia.diarization]
+    chunks = [VoiceActivityChunk(start=x.start, end=x.end) for x in dia.segments]
 
     # sort and merge overlapping chunks
     chunks = _merge_overlapping_chunks(chunks)
