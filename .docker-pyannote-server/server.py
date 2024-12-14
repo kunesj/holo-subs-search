@@ -23,7 +23,12 @@ _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 GPU_COUNT = torch.cuda.device_count()
+# 1 task uses like 75% of RTX 3090 max performance, so 2 per device should be optimal
+GPU_PARALLEL_COUNT = int(os.getenv("GPU_PARALLEL_COUNT", default="2"))
+
 CPU_COUNT = int(os.getenv("CPU_DEVICES", default="0"))
+CPU_PARALLEL_COUNT = int(os.getenv("CPU_PARALLEL_COUNT", default="1"))
+
 AUDIO_SEMAPHORE = asyncio.Semaphore(int(os.getenv("AUDIO_SEMAPHORE", default="12")))
 DIARIZATION_SEMAPHORE = asyncio.Semaphore(int(os.getenv("DIARIZATION_SEMAPHORE", default="16")))
 
@@ -34,10 +39,14 @@ DIARIZATION_SEMAPHORE = asyncio.Semaphore(int(os.getenv("DIARIZATION_SEMAPHORE",
 
 @dataclasses.dataclass
 class DeviceState:
-    semaphore: asyncio.Semaphore
-    device: torch.device
-    checkpoint: str | None = None
-    pipeline: SpeakerDiarization | None = None
+    device: torch.device = dataclasses.field()
+    # IMPORTANT: semaphore limit must be exactly 1! One pipeline object can't be executed from two different threads.
+    #   Instead, create more device states for the same device!
+    semaphore: asyncio.Semaphore = dataclasses.field(default_factory=lambda: asyncio.Semaphore(1))
+    checkpoint: str | None = dataclasses.field(default=None)
+    pipeline: SpeakerDiarization | None = dataclasses.field(default=None)
+    # enforces order of states with same priority
+    sequence: int = dataclasses.field(default=0)
 
     @property
     def busy(self) -> bool:
@@ -55,21 +64,24 @@ class DeviceState:
 DEVICE_STATES: dict[str, DeviceState] = {}
 
 for idx in range(GPU_COUNT):
-    DEVICE_STATES[f"cuda:{idx}"] = DeviceState(
-        # 1 task uses like 75% of RTX 3090 max performance, so limit of 2 should be optimal
-        semaphore=asyncio.Semaphore(2),  # TODO: make env parameter
-        device=torch.device(f"cuda:{idx}"),
-    )
+    for n in range(GPU_PARALLEL_COUNT):
+        sequence = n
+        DEVICE_STATES[f"cuda:{idx}:{sequence}"] = DeviceState(
+            device=torch.device(f"cuda:{idx}"),
+            sequence=sequence,
+        )
 
 for idx in range(CPU_COUNT):
-    DEVICE_STATES[f"cpu:{idx}"] = DeviceState(
-        semaphore=asyncio.Semaphore(1),
-        device=torch.device("cpu"),
-    )
+    for n in range(CPU_PARALLEL_COUNT):
+        sequence = 100 + n
+        DEVICE_STATES[f"cpu:{idx}:{sequence}"] = DeviceState(
+            device=torch.device("cpu"),
+            sequence=sequence,
+        )
 
 if not DEVICE_STATES:
     raise RuntimeError("No devices available!")
-_logger.info("DEVICES: %s", ",".join(DEVICE_STATES.keys()))
+_logger.info("DEVICE STATES: %s", ",".join(DEVICE_STATES.keys()))
 
 
 # endregion
@@ -212,7 +224,10 @@ def get_next_device() -> str:
     """
     Returns device with that should process next task.
     """
-    sorted_devices = sorted(DEVICE_STATES.keys(), key=lambda device: DEVICE_STATES[device].priority)
+    sorted_devices = sorted(
+        DEVICE_STATES.keys(),
+        key=lambda device: (DEVICE_STATES[device].priority, DEVICE_STATES[device].sequence),
+    )
     return sorted_devices[0]
 
 

@@ -35,7 +35,9 @@ services:
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
     environment:
+      #- GPU_PARALLEL_COUNT=2
       - CPU_DEVICES=0
+      #- CPU_PARALLEL_COUNT=1
       #- AUDIO_SEMAPHORE=12
       #- DIARIZATION_SEMAPHORE=16
     deploy:
@@ -61,7 +63,9 @@ services:
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
     environment:
+      #- GPU_PARALLEL_COUNT=2
       - CPU_DEVICES=1
+      #- CPU_PARALLEL_COUNT=1
       - AUDIO_SEMAPHORE=1
       - DIARIZATION_SEMAPHORE=1
 
