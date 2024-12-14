@@ -56,7 +56,8 @@ DEVICE_STATES: dict[str, DeviceState] = {}
 
 for idx in range(GPU_COUNT):
     DEVICE_STATES[f"cuda:{idx}"] = DeviceState(
-        semaphore=asyncio.Semaphore(1),
+        # 1 task uses like 75% of RTX 3090 max performance, so limit of 2 should be optimal
+        semaphore=asyncio.Semaphore(2),  # TODO: make env parameter
         device=torch.device(f"cuda:{idx}"),
     )
 
