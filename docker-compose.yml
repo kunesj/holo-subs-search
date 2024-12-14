@@ -34,6 +34,10 @@ services:
       - 8001:8001
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
+    environment:
+      - CPU_DEVICES=0
+      #- AUDIO_SEMAPHORE=12
+      #- DIARIZATION_SEMAPHORE=16
     deploy:
       resources:
         reservations:
@@ -56,6 +60,10 @@ services:
       - 8001:8001
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
+    environment:
+      - CPU_DEVICES=1
+      - AUDIO_SEMAPHORE=1
+      - DIARIZATION_SEMAPHORE=1
 
 volumes:
   hugging_face_cache:
