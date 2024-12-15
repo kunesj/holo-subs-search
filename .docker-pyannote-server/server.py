@@ -36,28 +36,38 @@ DIARIZATION_SEMAPHORE = asyncio.Semaphore(int(os.getenv("DIARIZATION_SEMAPHORE",
 # region
 
 
+class CounterSemaphore(asyncio.Semaphore):
+    def __init__(self, value: int = 1) -> None:
+        self._capacity = value
+        super().__init__(value=value)
+
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    @property
+    def running(self) -> int:
+        return max(self._capacity - self._value, 0)
+
+    @property
+    def waiting(self) -> int:
+        return len([x for x in (self._waiters or ()) if not x.cancelled()])
+
+
 @dataclasses.dataclass
 class DeviceState:
     device: torch.device = dataclasses.field()
     # IMPORTANT: semaphore limit must be exactly 1! One pipeline object can't be executed from two different threads.
     #   Instead, create more device states for the same device!
-    semaphore: asyncio.Semaphore = dataclasses.field(default_factory=lambda: asyncio.Semaphore(1))
+    semaphore: CounterSemaphore = dataclasses.field(default_factory=lambda: CounterSemaphore(1))
     checkpoint: str | None = dataclasses.field(default=None)
     pipeline: SpeakerDiarization | None = dataclasses.field(default=None)
     # enforces order of states with same priority
     sequence: int = dataclasses.field(default=0)
 
     @property
-    def busy(self) -> bool:
-        return self.semaphore.locked()
-
-    @property
-    def waiting(self) -> int:
-        return len([x for x in (self.semaphore._waiters or ()) if not x.cancelled()])
-
-    @property
     def priority(self) -> int:
-        return self.waiting + (1 if self.busy else 0)
+        return self.semaphore.running + self.semaphore.waiting
 
 
 DEVICE_STATES: dict[str, DeviceState] = {}
@@ -275,7 +285,7 @@ def healthcheck() -> Response:
 
 # Can be tested with:
 # curl -X POST -F "file=@/home/????/????/599.m4a"
-# "http://0.0.0.0:8001/diarization?checkpoint=pyannote/speaker-diarization-3.1&huggingface_token=????"
+# "http://0.0.0.0:8010/diarization?checkpoint=pyannote/speaker-diarization-3.1&huggingface_token=????"
 @app.post("/diarization")
 async def diarization(
     file: UploadFile,

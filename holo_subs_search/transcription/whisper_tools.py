@@ -13,11 +13,11 @@ import pydub
 
 from ..env_config import (
     VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
-    WHISPER_API_KEY,
-    WHISPER_BASE_URL,
-    WHISPER_PARALLEL_COUNT,
+    WHISPER_API_KEYS,
+    WHISPER_BASE_URLS,
+    WHISPER_PARALLEL_COUNTS,
 )
-from ..utils import with_semaphore
+from ..utils import CounterSemaphore, with_semaphore
 from .transcription import Transcription
 from .voice_activity import VoiceActivityChunk, diarization_to_voice_activity
 
@@ -25,21 +25,22 @@ if TYPE_CHECKING:
     from ..diarization import Diarization
 
 _logger = logging.getLogger(__name__)
-WHISPER_API_SEMAPHORE = asyncio.Semaphore(WHISPER_PARALLEL_COUNT)
-# Same parallel count as `WHISPER_API_SEMAPHORE`, to not start new chunks when api might be busy
-WHISPER_CHUNK_SEMAPHORE = asyncio.Semaphore(WHISPER_PARALLEL_COUNT)
+WHISPER_API_SEMAPHORES = [CounterSemaphore(n) for n in WHISPER_PARALLEL_COUNTS]
+# Same as sum of `WHISPER_API_SEMAPHORES`, to not queue chunks before we know which server/device will be free next
+WHISPER_CHUNK_SEMAPHORE = CounterSemaphore(sum(WHISPER_PARALLEL_COUNTS))
 # Usually, it does not make sense for this to be more than 1, because one diarized transcription can generate many
 # concurrent api calls. So we default it to number of videos we want to transcribe concurrently. That should also be 1.
-WHISPER_DIARIZED_SEMAPHORE = asyncio.Semaphore(VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT)
+WHISPER_DIARIZED_SEMAPHORE = CounterSemaphore(VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT)
 
 # Audio formats that are supported by Whisper
 WHISPER_AUDIO_FORMATS = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
 
-# TODO: maybe check whisperX for VA or improvements. But don't use it by itself.
-#   - https://github.com/m-bain/whisperX/blob/main/whisperx/vad.py
+
+def get_next_server() -> tuple[CounterSemaphore, str, str]:
+    idx = WHISPER_API_SEMAPHORES.index(min(WHISPER_API_SEMAPHORES, key=lambda x: x.busyness))
+    return WHISPER_API_SEMAPHORES[idx], WHISPER_BASE_URLS[idx], WHISPER_API_KEYS[idx]
 
 
-@with_semaphore(WHISPER_API_SEMAPHORE)
 async def transcribe_audio(
     file: io.BytesIO | bytes | pathlib.Path,
     *,
@@ -70,18 +71,20 @@ async def transcribe_audio(
         https://github.com/openai/whisper/discussions/870#discussioncomment-4743438
     - I was unable to find if low bitrate has any negative effects
     """
-    async with openai.AsyncOpenAI(api_key=WHISPER_API_KEY, base_url=WHISPER_BASE_URL) as client:
-        transcript = await client.audio.transcriptions.create(
-            file=file,
-            model=model,
-            language=openai.NOT_GIVEN if lang is None else lang,
-            prompt=openai.NOT_GIVEN if prompt is None else prompt,
-            response_format="verbose_json",
-            temperature=openai.NOT_GIVEN if temperature is None else temperature,
-            timestamp_granularities=["segment"],
-            timeout=openai.NOT_GIVEN if timeout is None else timeout,
-        )
-        return Transcription.from_openai(transcript)
+    semaphore, base_url, api_key = get_next_server()
+    async with semaphore:
+        async with openai.AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
+            transcript = await client.audio.transcriptions.create(
+                file=file,
+                model=model,
+                language=openai.NOT_GIVEN if lang is None else lang,
+                prompt=openai.NOT_GIVEN if prompt is None else prompt,
+                response_format="verbose_json",
+                temperature=openai.NOT_GIVEN if temperature is None else temperature,
+                timestamp_granularities=["segment"],
+                timeout=openai.NOT_GIVEN if timeout is None else timeout,
+            )
+            return Transcription.from_openai(transcript)
 
 
 @with_semaphore(WHISPER_DIARIZED_SEMAPHORE)
@@ -154,3 +157,7 @@ async def transcribe_diarized_audio(
         "temperature": temperature,
     }
     return Transcription(segments=segments, params={k: v for k, v in params.items() if v is not None})
+
+
+# TODO: maybe check whisperX for VA or improvements. But don't use it by itself.
+#   - https://github.com/m-bain/whisperX/blob/main/whisperx/vad.py

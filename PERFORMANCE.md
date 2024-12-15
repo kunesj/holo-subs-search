@@ -20,6 +20,8 @@ Test data: 6 audio files, 10 minutes long, roughly half speech
 - Duration: 23:13:05,253 to 23:15:32,217 ~= 2m27s
 - Times: 24, 24, 24, 24, 24, 24
 
+That's 3x longer than GPU1
+
 ### Server: GPU1 parallel=1, Client: parallel=1
 
 - Startup: model loaded
@@ -57,21 +59,26 @@ Adding slow GPU makes sense only with a lot of files
 
 ## Transcription
 
-- server parallel: `WHISPER__DEVICE_INDEX=[0,0]` - twice on first gpu
-- client parallel: `WHISPER_PARALLEL_COUNT=1`
+- server parallel: `WHISPER__DEVICE_INDEX=[0,1]` 
+  - `[0,1]` on two gpu
+  - `[0,0]` twice on same gpu
+- client parallel: `WHISPER_PARALLEL_COUNTS=1`
+  - `1,2` - `1` one for first server, `2` for second server 
 
-### Server: GPU0, Client: parallel=1
+### (outdated) Server: GPU0, Client: parallel=1
 
 - Duration: 23:58:23,123 to 00:14:23,188 ~= 16m 
 - Times: 161, 159, 159, 160, 160, 159
 
-### Server: GPU1, Client: parallel=1
+That's 10x longer than GPU1... Thankfully, the audio chunks are small, so it will not stop GPU1 from doing most of the work when used together. 
+
+### (outdated) Server: GPU1, Client: parallel=1
 
 - Startup: model loaded
 - Duration: 00:36:55,159 to 00:38:30,617 ~= 1m35s
 - Times: 15, 16, 15, 15, 15, 16
 
-### Server: GPU1, Client: parallel=2
+### (outdated) Server: GPU1, Client: parallel=2
 
 - Startup: model loaded
 - Duration: 00:26:15,354 to 00:27:45,031 ~= 1m30s
@@ -79,14 +86,36 @@ Adding slow GPU makes sense only with a lot of files
 
 A tiny bit faster, maybe because of some pre-processing? Larger parallel on client has no effect.
 
-### Server: GPU1 parallel=2, Client: parallel=1
+### (outdated) Server: GPU1 parallel=2, Client: parallel=1
 
 - Startup: model loaded
 - Duration: 00:44:07,866 to 00:45:49,883 ~= 1m42s
 - Times: 16, 17, 17, 16, 16, 16
 
-**Actually slower! Don't load Whisper twice on one GPU!**
+**Slower! Don't load Whisper twice on one GPU!**
 
 ### Server: GPU0 GPU1, Client: parallel=2
 
 Error: Cannot use multiple GPUs with different Compute Capabilities for the same model
+
+---------------------------------------------------------------------------------------
+
+### Server: GPU0 GPU1, Client: parallel=0,1, two servers, 3h40m audio
+
+506 seconds
+
+### Server: GPU0 GPU1, Client: parallel=1,1, two servers, 3h40m audio
+
+472 seconds
+
+### Server: GPU0 GPU1, Client: parallel=1,2, two servers, 3h40m audio
+
+396 seconds
+
+### Server: GPU0 GPU1, Client: parallel=2,2, two servers, 3h40m audio
+
+410 seconds
+
+### Server: GPU0 GPU1, Client: parallel=1,3, two servers, 3h40m audio
+
+**385 seconds**

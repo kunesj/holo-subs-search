@@ -7,9 +7,11 @@ import urllib.parse
 
 import aiohttp
 
-from ..env_config import HUGGINGFACE_TOKEN, PYANNOTE_BASE_URL, PYANNOTE_PARALLEL_COUNT
-from ..utils import with_semaphore
+from ..env_config import HUGGINGFACE_TOKEN, PYANNOTE_BASE_URLS, PYANNOTE_PARALLEL_COUNTS
+from ..utils import CounterSemaphore
 from .diarization import Diarization
+
+PYANNOTE_SEMAPHORES = [CounterSemaphore(n) for n in PYANNOTE_PARALLEL_COUNTS]
 
 DIARIZATION_CHECKPOINT = "pyannote/speaker-diarization-3.1"
 # - developed on 84fd25912480287da0247647c3d2b4853cb3ee5d
@@ -33,7 +35,11 @@ DIARIZATION_CHECKPOINT = "pyannote/speaker-diarization-3.1"
 #         min_duration_off: 0.0
 
 
-@with_semaphore(PYANNOTE_PARALLEL_COUNT)
+def get_next_server() -> tuple[CounterSemaphore, str]:
+    idx = PYANNOTE_SEMAPHORES.index(min(PYANNOTE_SEMAPHORES, key=lambda x: x.busyness))
+    return PYANNOTE_SEMAPHORES[idx], PYANNOTE_BASE_URLS[idx]
+
+
 async def audio_to_diarization_response(
     path: pathlib.Path,
     *,
@@ -43,27 +49,29 @@ async def audio_to_diarization_response(
     """
     - Supports any format ffmpeg supports
     """
-    params = {
-        "checkpoint": checkpoint,
-        "huggingface_token": HUGGINGFACE_TOKEN,
-    }
-    params = {k: v for k, v in params.items() if v is not None}
+    semaphore, base_url = get_next_server()
+    async with semaphore:
+        params = {
+            "checkpoint": checkpoint,
+            "huggingface_token": HUGGINGFACE_TOKEN,
+        }
+        params = {k: v for k, v in params.items() if v is not None}
 
-    async with aiohttp.ClientSession() as session:
-        if mt := mimetypes.guess_type(path):
-            content_type = mt[0]
-        else:
-            raise ValueError("Could not guess mimetype", path)
+        async with aiohttp.ClientSession() as session:
+            if mt := mimetypes.guess_type(path):
+                content_type = mt[0]
+            else:
+                raise ValueError("Could not guess mimetype", path)
 
-        data = aiohttp.FormData()
-        data.add_field("file", path.open("rb"), filename=os.path.basename(path), content_type=content_type)
+            data = aiohttp.FormData()
+            data.add_field("file", path.open("rb"), filename=os.path.basename(path), content_type=content_type)
 
-        response = await session.post(
-            url=urllib.parse.urljoin(PYANNOTE_BASE_URL, "diarization"),
-            data=data,
-            params=params,
-            timeout=timeout,
-        )
-        response.raise_for_status()
+            response = await session.post(
+                url=urllib.parse.urljoin(base_url, "diarization"),
+                data=data,
+                params=params,
+                timeout=timeout,
+            )
+            response.raise_for_status()
 
-        return Diarization.model_validate(await response.json())
+            return Diarization.model_validate(await response.json())

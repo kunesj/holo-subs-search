@@ -31,4 +31,4 @@ RUN pip install --no-cache-dir --upgrade -r /root/requirements.txt
 # copy server script
 
 COPY .docker-pyannote-server/server.py /root/server.py
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -14,7 +14,7 @@ from typing import Callable
 import termcolor
 
 from . import diarization, holodex_tools, transcription
-from .env_config import VIDEO_PROCESS_PARALLEL_COUNT
+from .env_config import PYANNOTE_BASE_URLS, VIDEO_PROCESS_PARALLEL_COUNT, WHISPER_BASE_URLS
 from .logging_config import logging_with_values, setup_logging
 from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
 from .storage.content_item import MULTI_LANG, AudioItem, SubtitleItem
@@ -292,6 +292,9 @@ async def main() -> None:
     # logger configuration
 
     setup_logging(args.debug)
+
+    _logger.info("Pyannote servers: %s", PYANNOTE_BASE_URLS)
+    _logger.info("Whisper servers: %s", WHISPER_BASE_URLS)
 
     # storage
 

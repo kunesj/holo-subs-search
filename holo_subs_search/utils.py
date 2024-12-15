@@ -176,3 +176,33 @@ def with_semaphore(arg: Union[Callable, asyncio.Semaphore, int] = 1) -> Callable
         return wrapped
 
     return wrapper(_fcn) if _fcn else wrapper
+
+
+class CounterSemaphore(asyncio.Semaphore):
+    def __init__(self, value: int = 1) -> None:
+        self._capacity = value
+        super().__init__(value=value)
+
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    @property
+    def running(self) -> int:
+        return max(self.capacity - self._value, 0)
+
+    @property
+    def waiting(self) -> int:
+        return len([x for x in (self._waiters or ()) if not x.cancelled()])
+
+    @property
+    def busyness(self) -> int:
+        """
+        Larger value means that the semaphore is more busy.
+        Assumes that semaphores with larger capacity should get more tasks.
+        """
+        if self.capacity <= 0:
+            # never use it, because it will block forever
+            return 999999999
+
+        return (self.running + self.waiting) - self.capacity
