@@ -29,12 +29,15 @@ WHISPER_BASE_URLS = get_env("WHISPER_BASE_URLS", lambda x: x.split(","), default
 # can be empty/placeholder for local api
 WHISPER_API_KEYS = get_env("WHISPER_API_KEYS", lambda x: x.split(","), default="placeholder")
 
+if len(WHISPER_BASE_URLS) != len(WHISPER_API_KEYS):
+    raise RuntimeError("Number of items in WHISPER_BASE_URLS must be the same as in WHISPER_API_KEYS")
+
 # Video processing
 
 VIDEO_PROCESS_PARALLEL_COUNT = get_env("VIDEO_PROCESS_PARALLEL_COUNT", int, default="1")
 VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT = get_env("VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT", int, default="1")
 VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT = get_env("VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT", int, default="1")
-# Don't touch this one. Raising just WHISPER_API_PARALLEL_COUNT is a lot better.
+# Don't touch this one. Raising just WHISPER_PARALLEL_COUNTS is a lot better.
 # One diarized transcription can generate many concurrent api calls, so raising this does not make sense.
 VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT = get_env("VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT", int, default="1")
 
@@ -42,23 +45,19 @@ VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT = get_env("VIDEO_WHISPER_TRANSCRIBE_PARA
 
 HOLODEX_PARALLEL_COUNT = get_env("HOLODEX_PARALLEL_COUNT", int, default="1")
 YTDL_PARALLEL_COUNT = get_env("YTDL_PARALLEL_COUNT", int, default=str(VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT))
+
 PYANNOTE_PARALLEL_COUNTS = get_env(
     "PYANNOTE_PARALLEL_COUNTS",
     lambda x: [int(y) for y in x.split(",")],
-    default=",".join(str(VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT) for _ in PYANNOTE_BASE_URLS),
+    default=str(VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT),
 )
+PYANNOTE_PARALLEL_COUNTS += [PYANNOTE_PARALLEL_COUNTS[-1] if PYANNOTE_PARALLEL_COUNTS else 1] * len(PYANNOTE_BASE_URLS)
+PYANNOTE_PARALLEL_COUNTS = PYANNOTE_PARALLEL_COUNTS[: len(PYANNOTE_BASE_URLS)]
+
 WHISPER_PARALLEL_COUNTS = get_env(
     "WHISPER_PARALLEL_COUNTS",
     lambda x: [int(y) for y in x.split(",")],
-    default=",".join("1" for _ in PYANNOTE_BASE_URLS),
+    default="1",
 )
-
-# Validators
-
-if len(PYANNOTE_BASE_URLS) != len(PYANNOTE_PARALLEL_COUNTS):
-    raise RuntimeError("Number of items in PYANNOTE_BASE_URLS must be the same as in PYANNOTE_PARALLEL_COUNTS")
-
-if not (len(WHISPER_BASE_URLS) == len(WHISPER_API_KEYS) == len(WHISPER_PARALLEL_COUNTS)):
-    raise RuntimeError(
-        "Number of items in WHISPER_BASE_URL must be the same as in WHISPER_API_KEY and WHISPER_PARALLEL_COUNTS"
-    )
+WHISPER_PARALLEL_COUNTS += [WHISPER_PARALLEL_COUNTS[-1] if WHISPER_PARALLEL_COUNTS else 1] * len(WHISPER_BASE_URLS)
+WHISPER_PARALLEL_COUNTS = WHISPER_PARALLEL_COUNTS[: len(WHISPER_BASE_URLS)]

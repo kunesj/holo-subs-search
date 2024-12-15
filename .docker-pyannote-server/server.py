@@ -22,16 +22,28 @@ SpeakerEmbeddingsType = dict[str, list[float]]
 _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+# ============================= ENV ===============================
+# region
+
+
 GPU_COUNT = torch.cuda.device_count()
-GPU_PARALLEL_COUNT = int(os.getenv("GPU_PARALLEL_COUNT", default="1"))
+GPU_PARALLEL_COUNTS_STR = os.getenv("GPU_PARALLEL_COUNTS", default="1")
+GPU_PARALLEL_COUNTS = [int(x) for x in GPU_PARALLEL_COUNTS_STR.split(",")]
+GPU_PARALLEL_COUNTS += [GPU_PARALLEL_COUNTS[-1] if GPU_PARALLEL_COUNTS else 1] * GPU_COUNT
+GPU_PARALLEL_COUNTS = GPU_PARALLEL_COUNTS[:GPU_COUNT]
 
 CPU_COUNT = int(os.getenv("CPU_DEVICES", default="0"))
-CPU_PARALLEL_COUNT = int(os.getenv("CPU_PARALLEL_COUNT", default="1"))
+CPU_PARALLEL_COUNTS_STR = os.getenv("CPU_PARALLEL_COUNTS", default="1")
+CPU_PARALLEL_COUNTS = [int(x) for x in CPU_PARALLEL_COUNTS_STR.split(",")]
+CPU_PARALLEL_COUNTS += [CPU_PARALLEL_COUNTS[-1] if CPU_PARALLEL_COUNTS else 1] * CPU_COUNT
+CPU_PARALLEL_COUNTS = CPU_PARALLEL_COUNTS[:CPU_COUNT]
 
 AUDIO_SEMAPHORE = asyncio.Semaphore(int(os.getenv("AUDIO_SEMAPHORE", default="12")))
 DIARIZATION_SEMAPHORE = asyncio.Semaphore(int(os.getenv("DIARIZATION_SEMAPHORE", default="16")))
 
 
+# endregion
 # ============================= DEVICES ===============================
 # region
 
@@ -73,7 +85,7 @@ class DeviceState:
 DEVICE_STATES: dict[str, DeviceState] = {}
 
 for idx in range(GPU_COUNT):
-    for n in range(GPU_PARALLEL_COUNT):
+    for n in range(GPU_PARALLEL_COUNTS[idx]):
         sequence = n
         DEVICE_STATES[f"cuda:{idx}:{sequence}"] = DeviceState(
             device=torch.device(f"cuda:{idx}"),
@@ -81,7 +93,7 @@ for idx in range(GPU_COUNT):
         )
 
 for idx in range(CPU_COUNT):
-    for n in range(CPU_PARALLEL_COUNT):
+    for n in range(CPU_PARALLEL_COUNTS[idx]):
         sequence = 100 + n
         DEVICE_STATES[f"cpu:{idx}:{sequence}"] = DeviceState(
             device=torch.device("cpu"),

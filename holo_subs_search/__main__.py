@@ -14,7 +14,18 @@ from typing import Callable
 import termcolor
 
 from . import diarization, holodex_tools, transcription
-from .env_config import PYANNOTE_BASE_URLS, VIDEO_PROCESS_PARALLEL_COUNT, WHISPER_BASE_URLS
+from .env_config import (
+    HOLODEX_PARALLEL_COUNT,
+    PYANNOTE_BASE_URLS,
+    PYANNOTE_PARALLEL_COUNTS,
+    VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT,
+    VIDEO_PROCESS_PARALLEL_COUNT,
+    VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT,
+    VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
+    WHISPER_BASE_URLS,
+    WHISPER_PARALLEL_COUNTS,
+    YTDL_PARALLEL_COUNT,
+)
 from .logging_config import logging_with_values, setup_logging
 from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
 from .storage.content_item import MULTI_LANG, AudioItem, SubtitleItem
@@ -293,8 +304,18 @@ async def main() -> None:
 
     setup_logging(args.debug)
 
-    _logger.info("Pyannote servers: %s", PYANNOTE_BASE_URLS)
-    _logger.info("Whisper servers: %s", WHISPER_BASE_URLS)
+    _logger.info(
+        "Video Parallel: video=%s, ytfetch=%s, pyannote=%s, whisper=%s",
+        VIDEO_PROCESS_PARALLEL_COUNT,
+        VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT,
+        VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT,
+        VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
+    )
+
+    _logger.info("Holodex parallel: %s", HOLODEX_PARALLEL_COUNT)
+    _logger.info("ytdl parallel: %s", YTDL_PARALLEL_COUNT)
+    _logger.info("Pyannote servers: %s, parallel=%s", PYANNOTE_BASE_URLS, PYANNOTE_PARALLEL_COUNTS)
+    _logger.info("Whisper servers: %s, parallel=%s", WHISPER_BASE_URLS, WHISPER_PARALLEL_COUNTS)
 
     # storage
 

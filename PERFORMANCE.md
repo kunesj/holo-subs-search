@@ -11,7 +11,8 @@ Test data: 6 audio files, 10 minutes long, roughly half speech
 
 ## Diarization
 
-- server parallel: `GPU_PARALLEL_COUNT=1`
+- server parallel: `GPU_PARALLEL_COUNTS=1`
+  - `1,2` - `1` one for first GPU, `2` for second GPU 
 - client parallel: `VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT=1`
 
 ### Server: GPU0 parallel=1, Client: parallel=1
@@ -55,6 +56,31 @@ We were waiting for the slow GPU to finish, so that slowed it down a lot
 - Times: 8,8,8,259,8,8,259,8,259,9,8,25,9,8,8,25,8
 
 Adding slow GPU makes sense only with a lot of files
+
+---------------------------------------------------------------------------------------
+
+Using `1` parallel count on slow GPU and `2` on fast will probably get the best results.
+
+Near 100% GPU use with this hardware can be reached with following settings:
+
+- Pyannote Server
+    ```
+    environment:
+      - GPU_PARALLEL_COUNTS=2,1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1', '0']
+              capabilities: [gpu]
+    ```
+  
+- Client
+    ```
+    # this is one more than GPUs can handle, to allow server to preprocess the next audio while it's waiting
+    VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT=4
+    ```
 
 
 ## Transcription
