@@ -1,4 +1,5 @@
 yt-dlp>=2024.12.6
+secretstorage==3.3.3
 srt==3.5.*
 holodex==0.11.11
 termcolor==2.5.0
