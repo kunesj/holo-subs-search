@@ -14,10 +14,6 @@ class AudioItem(BaseItem):
     item_type = "audio"
 
     @property
-    def source(self) -> str:
-        return self.metadata["source"]
-
-    @property
     def audio_file(self) -> str:
         return self.metadata["audio_file"]
 
@@ -30,5 +26,7 @@ class AudioItem(BaseItem):
         return get_checksum(self.audio_path.read_bytes())
 
     @classmethod
-    def build_metadata(cls, *, source: str, audio_file: str, **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"source": source, "audio_file": audio_file}
+    def build_metadata(cls, *, audio_file: str | None = None, **kwargs) -> dict[str, Any]:
+        if audio_file is None:
+            raise ValueError(audio_file)
+        return super().build_metadata(**kwargs) | {"audio_file": audio_file}

@@ -1,0 +1,92 @@
+# Performance Testing
+
+Hardware:
+```
+GPU0: Nvidia GTX 1660 
+GPU1: Nvidia RTX 3090
+```
+
+Test data: 6 audio files, 10 minutes long, roughly half speech
+
+
+## Diarization
+
+- server parallel: `GPU_PARALLEL_COUNT=1`
+- client parallel: `VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT=1`
+
+### Server: GPU0 parallel=1, Client: parallel=1
+
+- Startup: model loaded
+- Duration: 23:13:05,253 to 23:15:32,217 ~= 2m27s
+- Times: 24, 24, 24, 24, 24, 24
+
+### Server: GPU1 parallel=1, Client: parallel=1
+
+- Startup: model loaded
+- Duration: 22:52:18,360 to 22:53:07,058 ~= 49s 
+- Times: 8, 8, 8, 8, 7, 8
+
+### Server: GPU1 parallel=1, Client: parallel=2
+
+- Startup: model loaded
+- Duration: 22:55:56,977 to 22:56:43,264 ~= 47s
+- Times: 8, 15, 15, 15, 15, 14
+
+### Server: GPU1 parallel=2, Client: parallel=2
+
+- Startup: model loaded
+- Duration: 23:28:45,099 to 23:29:25,946 ~= 40s
+- Times: 14, 14, 13, 13, 13, 13
+
+### Server: GPU0 GPU1 parallel=1, Client: parallel=2, 6 files
+
+- Startup: model loaded
+- Duration: 23:34:31,768 to 23:35:22,795 ~= 49s
+- Times: 9, 8, 8, 26, 8, 24
+
+We were waiting for the slow GPU to finish, so that slowed it down a lot
+
+### Server: GPU0 GPU1 parallel=1, Client: parallel=2, 20 files
+
+- Startup: model loaded
+- Duration: 23:43:52,589 to 23:46:04,300 ~= 2m12s * (6/20) ~= 39,6s
+- Times: 8,8,8,259,8,8,259,8,259,9,8,25,9,8,8,25,8
+
+Adding slow GPU makes sense only with a lot of files
+
+
+## Transcription
+
+- server parallel: `WHISPER__DEVICE_INDEX=[0,0]` - twice on first gpu
+- client parallel: `WHISPER_PARALLEL_COUNT=1`
+
+### Server: GPU0, Client: parallel=1
+
+- Duration: 23:58:23,123 to 00:14:23,188 ~= 16m 
+- Times: 161, 159, 159, 160, 160, 159
+
+### Server: GPU1, Client: parallel=1
+
+- Startup: model loaded
+- Duration: 00:36:55,159 to 00:38:30,617 ~= 1m35s
+- Times: 15, 16, 15, 15, 15, 16
+
+### Server: GPU1, Client: parallel=2
+
+- Startup: model loaded
+- Duration: 00:26:15,354 to 00:27:45,031 ~= 1m30s
+- Times: 14, 14, 14, 16, 14, 14
+
+A tiny bit faster, maybe because of some pre-processing? Larger parallel on client has no effect.
+
+### Server: GPU1 parallel=2, Client: parallel=1
+
+- Startup: model loaded
+- Duration: 00:44:07,866 to 00:45:49,883 ~= 1m42s
+- Times: 16, 17, 17, 16, 16, 16
+
+**Actually slower! Don't load Whisper twice on one GPU!**
+
+### Server: GPU0 GPU1, Client: parallel=2
+
+Error: Cannot use multiple GPUs with different Compute Capabilities for the same model

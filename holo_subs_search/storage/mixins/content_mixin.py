@@ -6,16 +6,32 @@ import os
 import pathlib
 from typing import Callable, Iterator
 
-from ..content_item import CONTENT_ITEM_TYPES, BaseItem, ContentItemType
+from ..content_item import CONTENT_ITEM_TYPES, AudioItem, BaseItem, ContentItemType, DiarizationItem, SubtitleItem
 from .files_mixin import FilesMixin
 
 _logger = logging.getLogger(__name__)
 
 
 class ContentMixin(FilesMixin, abc.ABC):
+    # Properties
+
     @property
     def content_path(self) -> pathlib.Path:
         return self.files_path / "content/"
+
+    @property
+    def audio_sources(self) -> frozenset[str]:
+        return frozenset(x.source for x in self.list_content(AudioItem.build_filter()))
+
+    @property
+    def diarization_sources(self) -> frozenset[str]:
+        return frozenset(x.source for x in self.list_content(DiarizationItem.build_filter()))
+
+    @property
+    def subtitle_sources(self) -> frozenset[str]:
+        return frozenset(x.source for x in self.list_content(SubtitleItem.build_filter()))
+
+    # Methods
 
     def list_content(self, item_filter: Callable[[ContentItemType], bool] | None = None) -> Iterator[ContentItemType]:
         if not self.content_path.exists():

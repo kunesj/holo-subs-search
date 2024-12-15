@@ -1,6 +1,9 @@
 #!/usr/bin/env python3.11
 
+from __future__ import annotations
+
 import argparse
+import asyncio
 import datetime
 import logging
 import os
@@ -11,8 +14,11 @@ from typing import Callable
 import termcolor
 
 from . import diarization, holodex_tools, transcription
+from .env_config import VIDEO_PROCESS_PARALLEL_COUNT
+from .logging_config import logging_with_values, setup_logging
 from .storage import ChannelRecord, FilterPart, Flags, Storage, VideoRecord
 from .storage.content_item import MULTI_LANG, AudioItem, SubtitleItem
+from .utils import with_semaphore
 
 _logger = logging.getLogger(__name__)
 DIR_PATH = pathlib.Path(os.path.dirname(__file__))
@@ -82,8 +88,50 @@ def _search_video_subtitles(
                     print(f"{datetime.timedelta(seconds=ts_seconds)} | {ts_content}")
 
 
+@with_semaphore(VIDEO_PROCESS_PARALLEL_COUNT)
+@logging_with_values(get_context=lambda args, video, *_, **__: [f"video={video.id}"])
+async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
+    # fetching YouTube content
+
+    if args.youtube_fetch_subtitles or args.youtube_fetch_audio and video.youtube_id:
+        await video.fetch_youtube(
+            download_subtitles=args.youtube_fetch_subtitles_langs if args.youtube_fetch_subtitles else None,
+            download_audio=args.youtube_fetch_audio,
+            cookies_from_browser=args.youtube_cookies_from_browser,
+            memberships=args.youtube_memberships,
+            force=args.youtube_force,
+        )
+        video.update_gitignore()
+
+    # diarize audio with pyannote
+
+    if args.pyannote_diarize_audio:
+        await video.pyannote_diarize_audio(
+            checkpoint=args.pyannote_checkpoint,
+            force=args.pyannote_force,
+        )
+
+    # transcribe audio with whisper
+
+    if args.whisper_transcribe_audio:
+        await video.whisper_transcribe_audio(
+            model=args.whisper_model,
+            langs=args.whisper_langs,
+            force=args.whisper_force,
+        )
+
+    # clear audio
+
+    if args.youtube_clear_audio:
+        for audio_item in video.list_content(
+            AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube"))
+        ):
+            _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
+            shutil.rmtree(audio_item.path)
+
+
 # flake8: noqa: C801
-def main() -> None:
+async def main() -> None:
     # parse arguments
 
     parser = argparse.ArgumentParser()
@@ -179,20 +227,10 @@ def main() -> None:
         action="store_true",
         help="Don't skip already processed or unavailable items",
     )
-    # ---- HuggingFace ----
-    parser.add_argument(
-        "--huggingface-token",
-        default=None,
-    )
     # ---- Pyannote ----
     parser.add_argument(
         "--pyannote-diarize-audio",
         action="store_true",
-    )
-    parser.add_argument(
-        "--pyannote-api-base-url",
-        default="http://localhost:8001/",
-        help="Url of pyannote-server API",
     )
     parser.add_argument(
         "--pyannote-checkpoint",
@@ -207,15 +245,6 @@ def main() -> None:
     parser.add_argument(
         "--whisper-transcribe-audio",
         action="store_true",
-    )
-    parser.add_argument(
-        "--whisper-api-key",
-        default="placeholder",  # can be empty/placeholder for local api
-    )
-    parser.add_argument(
-        "--whisper-api-base-url",
-        default="http://localhost:8000/v1/",
-        help="Url of OpenAI-compatible API with whisper support.",
     )
     parser.add_argument(
         "--whisper-model",
@@ -262,13 +291,7 @@ def main() -> None:
 
     # logger configuration
 
-    logging.basicConfig()
-    logger = logging.getLogger()
-    logger.setLevel(args.debug)
-
-    logging.getLogger("openai").setLevel(logging.ERROR)
-    logging.getLogger("httpx").setLevel(logging.ERROR)
-    logging.getLogger("httpcore").setLevel(logging.INFO)
+    setup_logging(args.debug)
 
     # storage
 
@@ -299,13 +322,13 @@ def main() -> None:
 
     if args.fetch_org_channels:
         _logger.info("Fetching %r channels...", args.fetch_org_channels)
-        for value in holodex_tools.download_org_channels(org=args.fetch_org_channels):
+        async for value in holodex_tools.download_org_channels(org=args.fetch_org_channels):
             ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             fetch_holodex_ids -= {value.id}
 
     if fetch_holodex_ids:
         _logger.info("Refreshing stored channels...")
-        for value in holodex_tools.download_channels(channel_ids=set(fetch_holodex_ids)):
+        async for value in holodex_tools.download_channels(channel_ids=set(fetch_holodex_ids)):
             ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             fetch_holodex_ids -= {value.id}
 
@@ -322,60 +345,18 @@ def main() -> None:
             for channel in storage.list_channels(channel_filter)
             if channel.holodex_id and Flags.MENTIONS_ONLY not in channel.flags
         }
-        for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
+        async for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
             if value.status in ("new", "upcoming", "live"):
                 continue
             video = VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
             video.update_gitignore()
 
     # process video
-    # TODO: queue every step in separate thread to allow starting download/diarization/transcription of next video
-    #  while first one is not finished
-    # TODO: maybe check whisperX for VA or improvements. But don't use it by itself.
-    #   - https://github.com/m-bain/whisperX/blob/main/whisperx/vad.py
 
-    for video in storage.list_videos(video_filter):
-        # fetching YouTube content
-
-        if args.youtube_fetch_subtitles or args.youtube_fetch_audio and video.youtube_id:
-            video.fetch_youtube(
-                download_subtitles=args.youtube_fetch_subtitles_langs if args.youtube_fetch_subtitles else None,
-                download_audio=args.youtube_fetch_audio,
-                cookies_from_browser=args.youtube_cookies_from_browser,
-                memberships=args.youtube_memberships,
-                force=args.youtube_force,
-            )
-            video.update_gitignore()
-
-        # diarize audio with pyannote
-
-        if args.pyannote_diarize_audio:
-            video.pyannote_diarize_audio(
-                api_base_url=args.pyannote_api_base_url,
-                checkpoint=args.pyannote_checkpoint,
-                huggingface_token=args.huggingface_token,
-                force=args.pyannote_force,
-            )
-
-        # transcribe audio with whisper
-
-        if args.whisper_transcribe_audio:
-            video.whisper_transcribe_audio(
-                api_base_url=args.whisper_api_base_url,
-                api_key=args.whisper_api_key,
-                model=args.whisper_model,
-                langs=args.whisper_langs,
-                force=args.whisper_force,
-            )
-
-        # clear audio
-
-        if args.youtube_clear_audio:
-            for audio_item in video.list_content(
-                AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube"))
-            ):
-                _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
-                shutil.rmtree(audio_item.path)
+    async with asyncio.TaskGroup() as tg:
+        for video in storage.list_videos(video_filter):
+            coro = _process_video(args, video)
+            tg.create_task(coro)
 
     # searching parsed subtitles
 
@@ -391,4 +372,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

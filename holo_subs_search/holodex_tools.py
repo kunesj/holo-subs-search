@@ -1,24 +1,23 @@
+from __future__ import annotations
+
+import asyncio
 import logging
-import os
-from typing import AsyncIterator, Iterable, Iterator
+from typing import AsyncIterator, Iterable
 
 from holodex.client import HolodexClient
 from holodex.model.channel import Channel
 from holodex.model.channel_video import ChannelVideoInfo
 from holodex.model.channels import LiteChannel
 
-from .utils import iter_over_async
+from .env_config import HOLODEX_API_KEY, HOLODEX_PARALLEL_COUNT
 
 _logger = logging.getLogger(__name__)
-
-API_KEY = os.getenv("HOLODEX_API_KEY", None)
-if not API_KEY:
-    raise RuntimeError("HOLODEX_API_KEY env variable must be set!")
+HOLODEX_SEMAPHORE = asyncio.Semaphore(HOLODEX_PARALLEL_COUNT)
 
 
-async def async_download_channel_video_info(channel_ids: Iterable[str]) -> AsyncIterator[ChannelVideoInfo]:
+async def download_channel_video_info(channel_ids: Iterable[str]) -> AsyncIterator[ChannelVideoInfo]:
     limit = 50
-    async with HolodexClient(key=API_KEY) as client:
+    async with HOLODEX_SEMAPHORE, HolodexClient(key=HOLODEX_API_KEY) as client:
         for channel_id in channel_ids:
             for video_type in ["videos", "collabs"]:
                 offset = 0
@@ -39,13 +38,9 @@ async def async_download_channel_video_info(channel_ids: Iterable[str]) -> Async
                         break
 
 
-def download_channel_video_info(channel_ids: Iterable[str]) -> Iterator[ChannelVideoInfo]:
-    return iter_over_async(async_download_channel_video_info(channel_ids))
-
-
-async def async_download_org_channels(org: str) -> AsyncIterator[LiteChannel]:
+async def download_org_channels(org: str) -> AsyncIterator[LiteChannel]:
     limit = 50
-    async with HolodexClient(key=API_KEY) as client:
+    async with HOLODEX_SEMAPHORE, HolodexClient(key=HOLODEX_API_KEY) as client:
         offset = 0
         while True:
             # noinspection PyTypeChecker
@@ -63,18 +58,10 @@ async def async_download_org_channels(org: str) -> AsyncIterator[LiteChannel]:
                 break
 
 
-def download_org_channels(org: str) -> Iterator[LiteChannel]:
-    return iter_over_async(async_download_org_channels(org=org))
-
-
-async def async_download_channels(channel_ids: Iterable[str]) -> AsyncIterator[Channel]:
-    async with HolodexClient(key=API_KEY) as client:
+async def download_channels(channel_ids: Iterable[str]) -> AsyncIterator[Channel]:
+    async with HOLODEX_SEMAPHORE, HolodexClient(key=HOLODEX_API_KEY) as client:
         for channel_id in channel_ids:
             try:
                 yield await client.channel(channel_id)
             except Exception:
                 _logger.exception("Channel info could not be fetched: %s", channel_id)
-
-
-def download_channels(channel_ids: Iterable[str]) -> Iterator[Channel]:
-    return iter_over_async(async_download_channels(channel_ids))

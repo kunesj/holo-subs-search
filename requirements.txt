@@ -4,3 +4,5 @@ holodex==0.11.11
 termcolor==2.5.0
 pydub==0.25.1
 pydantic>=2.8.2,<3.0.0
+openai==1.57.4
+aiohttp==3.11.10

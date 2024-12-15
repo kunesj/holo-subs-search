@@ -23,8 +23,7 @@ _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 GPU_COUNT = torch.cuda.device_count()
-# 1 task uses like 75% of RTX 3090 max performance, so 2 per device should be optimal
-GPU_PARALLEL_COUNT = int(os.getenv("GPU_PARALLEL_COUNT", default="2"))
+GPU_PARALLEL_COUNT = int(os.getenv("GPU_PARALLEL_COUNT", default="1"))
 
 CPU_COUNT = int(os.getenv("CPU_DEVICES", default="0"))
 CPU_PARALLEL_COUNT = int(os.getenv("CPU_PARALLEL_COUNT", default="1"))

@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
+import functools
 import hashlib
 import json
 import types
 import typing
-from typing import Annotated, Any, AsyncIterator, Callable, ClassVar, Iterator, Literal, Mapping, TypeVar, Union
+from typing import Annotated, Any, Callable, ClassVar, Iterator, Literal, Mapping, TypeVar, Union
 
 import annotated_types
 
@@ -20,25 +23,23 @@ NaiveDateTime = Annotated[datetime.datetime, annotated_types.Timezone(None)]
 AwareDateTime = Annotated[datetime.datetime, annotated_types.Timezone(...)]
 
 
-def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
-    with asyncio.Runner() as runner:
-        loop = runner.get_loop()
-        ait = ait.__aiter__()
+class UndefinedType:
+    pass
 
-        # helper async fn that just gets the next element
-        # from the async iterator
-        async def get_next():
-            try:
-                return False, await ait.__anext__()
-            except StopAsyncIteration:
-                return True, None
 
-        # actual sync iterator (implemented using a generator)
-        while True:
-            done, obj = loop.run_until_complete(get_next())
-            if done:
-                break
-            yield obj
+Undefined = UndefinedType()
+
+
+def is_async_callable(obj: Union[Callable, Any]) -> bool:
+    """
+    Better than inspect.iscoroutinefunction, because it also supports objects with `async def __call__():`.
+    Copy of `starlette._utils.is_async_callable`.
+    """
+    while isinstance(obj, functools.partial):
+        obj = obj.func
+
+    # noinspection PyUnresolvedReferences
+    return asyncio.iscoroutinefunction(obj) or (callable(obj) and asyncio.iscoroutinefunction(obj.__call__))
 
 
 def _json_dumps_default(obj: Any) -> Any:
@@ -145,3 +146,33 @@ def iter_typing_types(typing_: Any) -> Iterator[tuple[type[Any], ...]]:
 
         else:
             yield *parents, type(frag)
+
+
+def with_semaphore(arg: Union[Callable, asyncio.Semaphore, int] = 1) -> Callable:
+    """
+    Decorator that sets limits concurrent call to wrapped function
+    """
+    if isinstance(arg, asyncio.Semaphore):
+        _fcn = None
+        semaphore = arg
+    elif isinstance(arg, int):
+        _fcn = None
+        semaphore = asyncio.Semaphore(arg)
+    elif is_async_callable(arg):
+        _fcn = arg
+        semaphore = asyncio.Semaphore(1)
+    else:
+        raise ValueError(arg)
+
+    def wrapper(fcn: Callable) -> Callable:
+        if not is_async_callable(fcn):
+            raise ValueError(fcn)
+
+        @functools.wraps(fcn)
+        async def wrapped(*args, **kwargs):
+            async with semaphore:
+                return await fcn(*args, **kwargs)
+
+        return wrapped
+
+    return wrapper(_fcn) if _fcn else wrapper

@@ -1,11 +1,18 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
 import logging
 import os
 import pathlib
 import tempfile
 import time
-from typing import Any, Iterator
+from types import TracebackType
+from typing import Any, AsyncIterator, Self
 
 import yt_dlp
+
+from .env_config import YTDL_PARALLEL_COUNT
 
 _logger = logging.getLogger(__name__)
 
@@ -16,9 +23,47 @@ _logger = logging.getLogger(__name__)
 AUDIO_FORMAT = "(flac/m4a/ogg/wav/webm/mp3/mp4/mpeg/mpga)[asr>=16000][vcodec=none]"
 AUDIO_FORMAT_SORT = ["+size"]
 
+# "type" of subtitles - used only to generate filename
 PROPER_SUBS = "proper"
 TRANSCRIPTION_SUBS = "transcription"
 TRANSLATION_SUBS = "translation"
+
+
+class AsyncYoutubeDL(yt_dlp.YoutubeDL):
+    ASYNC_SEMAPHORE = asyncio.Semaphore(YTDL_PARALLEL_COUNT)
+    _async_stack = None
+
+    async def __aenter__(self) -> Self:
+        """
+        Implemented
+        """
+        if self._async_stack is not None:
+            raise ValueError("Already in context")
+
+        async with contextlib.AsyncExitStack() as stack:
+            await stack.enter_async_context(self.ASYNC_SEMAPHORE)
+            stack.enter_context(self)
+            self._async_stack = stack.pop_all()
+
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
+        """
+        Implemented
+        """
+        if self._async_stack is not None:
+            result = await self._async_stack.__aexit__(exc_type, exc_val, exc_tb)
+            self._async_stack = None
+            return result
+        return None
+
+    async def async_download(self, url_list: list[str]) -> int:
+        return await asyncio.to_thread(self.download, url_list)
 
 
 def get_video_params(
@@ -87,13 +132,13 @@ def get_video_params(
     return params
 
 
-def download_video(
+async def download_video(
     *,
     video_id: str,
     download_subtitles: list[str] | None = None,
     download_audio: bool = False,
     cookies_from_browser: str | None = None,
-) -> Iterator[tuple[str, str]]:
+) -> AsyncIterator[tuple[str, str]]:
     """
     Examples of returned filenames:
         info.json
@@ -115,7 +160,7 @@ def download_video(
                 # download audio and proper subtitles
 
                 missing_subtitles = set(download_subtitles) - set(done_subtitles.keys())
-                with yt_dlp.YoutubeDL(
+                async with AsyncYoutubeDL(
                     params=get_video_params(
                         download_path=tmpdir,
                         download_subtitles=[*missing_subtitles],
@@ -125,7 +170,8 @@ def download_video(
                         rate_limit_count=rate_limit_count,
                     )
                 ) as ydl:
-                    error_code = ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                    # run in separate thread to make download async
+                    error_code = await ydl.async_download([f"https://www.youtube.com/watch?v={video_id}"])
                     if error_code != 0:
                         raise Exception("yt-dlp download failed!")
 
@@ -146,7 +192,7 @@ def download_video(
                 # download automatic subtitles
 
                 if missing_subtitles := (set(download_subtitles) - set(done_subtitles.keys())):
-                    with yt_dlp.YoutubeDL(
+                    async with AsyncYoutubeDL(
                         params=get_video_params(
                             download_path=tmpdir,
                             download_subtitles=[*missing_subtitles],
@@ -156,7 +202,7 @@ def download_video(
                             rate_limit_count=rate_limit_count,
                         )
                     ) as ydl:
-                        error_code = ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                        error_code = await ydl.async_download([f"https://www.youtube.com/watch?v={video_id}"])
                         if error_code != 0:
                             raise Exception("yt-dlp download failed!")
 

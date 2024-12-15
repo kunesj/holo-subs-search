@@ -16,10 +16,6 @@ class DiarizationItem(BaseItem):
     # Properties
 
     @property
-    def source(self) -> str:
-        return self.metadata["source"]
-
-    @property
     def audio_id(self) -> str | None:
         return self.metadata.get("audio_id", None)
 
@@ -41,8 +37,8 @@ class DiarizationItem(BaseItem):
     # Methods
 
     @classmethod
-    def build_metadata(cls, *, source: str, audio_id: str | None = None, **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"source": source, "audio_id": audio_id}
+    def build_metadata(cls, *, audio_id: str | None = None, **kwargs) -> dict[str, Any]:
+        return super().build_metadata(**kwargs) | {"audio_id": audio_id}
 
     def load_diarization(self) -> Diarization | None:
         raw = self.load_json_file(self.DIARIZATION_JSON)

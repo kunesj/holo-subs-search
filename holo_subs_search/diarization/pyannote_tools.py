@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import mimetypes
 import os
 import pathlib
 import urllib.parse
 
-import requests
+import aiohttp
 
+from ..env_config import HUGGINGFACE_TOKEN, PYANNOTE_BASE_URL, PYANNOTE_PARALLEL_COUNT
+from ..utils import with_semaphore
 from .diarization import Diarization
 
 DIARIZATION_CHECKPOINT = "pyannote/speaker-diarization-3.1"
@@ -30,29 +33,37 @@ DIARIZATION_CHECKPOINT = "pyannote/speaker-diarization-3.1"
 #         min_duration_off: 0.0
 
 
-def audio_to_diarization_response(
+@with_semaphore(PYANNOTE_PARALLEL_COUNT)
+async def audio_to_diarization_response(
     path: pathlib.Path,
     *,
-    api_base_url: str,
     checkpoint: str,
-    huggingface_token: str | None = None,
-    timeout: float | None = None,
+    timeout: aiohttp.ClientTimeout | None = None,
 ) -> Diarization:
     """
     - Supports any format ffmpeg supports
     """
     params = {
         "checkpoint": checkpoint,
-        "huggingface_token": huggingface_token,
+        "huggingface_token": HUGGINGFACE_TOKEN,
     }
     params = {k: v for k, v in params.items() if v is not None}
 
-    response = requests.post(
-        url=urllib.parse.urljoin(api_base_url, "diarization"),
-        files={"file": (os.path.basename(path), path.open("rb"))},
-        params=params,
-        timeout=timeout,
-    )
-    response.raise_for_status()
+    async with aiohttp.ClientSession() as session:
+        if mt := mimetypes.guess_type(path):
+            content_type = mt[0]
+        else:
+            raise ValueError("Could not guess mimetype", path)
 
-    return Diarization.model_validate(response.json())
+        data = aiohttp.FormData()
+        data.add_field("file", path.open("rb"), filename=os.path.basename(path), content_type=content_type)
+
+        response = await session.post(
+            url=urllib.parse.urljoin(PYANNOTE_BASE_URL, "diarization"),
+            data=data,
+            params=params,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        return Diarization.model_validate(await response.json())

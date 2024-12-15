@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import logging
 import pathlib
-from typing import TYPE_CHECKING, Any, Iterator, Self
+from typing import TYPE_CHECKING, Iterator, Self
 
 import srt
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,7 +30,7 @@ class TranscriptionSegment(BaseModel):
     lang: str = Field()
 
     @classmethod
-    def from_openai_json(cls: type[Self], value: dict[str, Any], lang: str) -> Self:
+    def from_openai(cls: type[Self], value: openai.types.audio.TranscriptionSegment, lang: str) -> Self:
         """
         https://platform.openai.com/docs/api-reference/audio/verbose-json-object
         {
@@ -50,9 +50,9 @@ class TranscriptionSegment(BaseModel):
         }
         """
         return cls(
-            start=value["start"],
-            end=value["end"],
-            text=value["text"],
+            start=value.start,
+            end=value.end,
+            text=value.text,
             lang=lang,
         )
 
@@ -138,11 +138,11 @@ class Transcription(BaseModel):
         return {_lang for _lang, _count in lang_counts.items() if _count >= (len(self.segments) * min_occurrence)}
 
     @classmethod
-    def from_openai_transcription(cls: type[Self], value: openai.types.audio.Transcription) -> Self:
+    def from_openai(cls: type[Self], value: openai.types.audio.TranscriptionVerbose) -> Self:
         """
         https://platform.openai.com/docs/api-reference/audio/verbose-json-object
         """
-        return cls(segments=[TranscriptionSegment.from_openai_json(x, lang=value.language) for x in value.segments])
+        return cls(segments=[TranscriptionSegment.from_openai(x, lang=value.language) for x in value.segments])
 
     @classmethod
     def from_srt(cls: type[Self], source: str | pathlib.Path, lang: str) -> Self:

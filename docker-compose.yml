@@ -6,6 +6,11 @@ services:
       - 8000:8000
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
+    environment:
+      # https://github.com/fedirz/faster-whisper-server/blob/master/src/faster_whisper_server/config.py
+      # Set to [0,1] if you want to use two GPU, [0,1,2] for three, etc.
+      # Trying to load Whisper twice on one gpu with [0,0] actually slows it down! Don't do it.
+      - WHISPER__DEVICE_INDEX=[0]
     deploy:
       resources:
         reservations:
@@ -35,7 +40,9 @@ services:
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
     environment:
-      #- GPU_PARALLEL_COUNT=2
+      # `1` uses like 75% of RTX 3090 max performance, so at most `2` makes sense.
+      # `2` was 14% faster when testing with two identical concurrent requests.
+      - GPU_PARALLEL_COUNT=1
       - CPU_DEVICES=0
       #- CPU_PARALLEL_COUNT=1
       #- AUDIO_SEMAPHORE=12

@@ -18,10 +18,6 @@ class SubtitleItem(BaseItem):
     # Properties
 
     @property
-    def source(self) -> str:
-        return self.metadata["source"]
-
-    @property
     def lang(self) -> str:
         """Main language of the file. Can be MULTI_LANG."""
         return self.metadata["lang"]
@@ -59,17 +55,22 @@ class SubtitleItem(BaseItem):
     def build_metadata(
         cls,
         *,
-        source: str,
-        lang: str,
-        langs: set[str],
-        subtitle_file: str,
+        lang: str | None = None,
+        langs: set[str] | None = None,
+        subtitle_file: str | None = None,
         audio_id: str | None = None,
         diarization_id: str | None = None,
         whisper_model: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
+        if lang is None:
+            raise ValueError(lang)
+        elif langs is None:
+            raise ValueError(langs)
+        elif subtitle_file is None:
+            raise ValueError(subtitle_file)
+
         return super().build_metadata(**kwargs) | {
-            "source": source,
             "lang": lang,
             "langs": langs,
             "subtitle_file": subtitle_file,

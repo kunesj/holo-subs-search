@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
+import shutil
 import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -11,7 +13,13 @@ import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
 from .. import diarization, transcription, ydl_tools
-from ..utils import AwareDateTime, get_checksum, json_dumps
+from ..env_config import (
+    VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT,
+    VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT,
+    VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
+)
+from ..logging_config import logging_with_values
+from ..utils import AwareDateTime, get_checksum, json_dumps, with_semaphore
 from .content_item import MULTI_LANG, AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
 from .mixins.filterable_mixin import FilterPart
@@ -175,7 +183,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     # Youtube
 
-    def fetch_youtube(
+    async def fetch_youtube(
         self,
         *,
         download_subtitles: list[str] | None = None,
@@ -186,6 +194,27 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
     ) -> None:
         _logger.debug("Fetching Youtube subtitles/audio for video %s - %s", self.id, self.published_at)
 
+        async with asyncio.TaskGroup() as tg:
+            coro = self._fetch_youtube_single(
+                download_subtitles=download_subtitles,
+                download_audio=download_audio,
+                cookies_from_browser=cookies_from_browser,
+                memberships=memberships,
+                force=force,
+            )
+            tg.create_task(coro)
+
+    @with_semaphore(VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT)
+    @logging_with_values(get_context=lambda self, *args, **kwargs: [f"video={self.id}", "fetch-youtube"])
+    async def _fetch_youtube_single(
+        self,
+        *,
+        download_subtitles: list[str] | None = None,
+        download_audio: bool = False,
+        cookies_from_browser: str | None = None,
+        memberships: list[str] | None = None,
+        force: bool = False,
+    ) -> None:
         # check if video can be accessed
 
         if not force:
@@ -233,7 +262,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             download_audio,
         )
         try:
-            for name, file_path in ydl_tools.download_video(
+            async for name, file_path in ydl_tools.download_video(
                 video_id=self.youtube_id,
                 download_subtitles=download_subtitles,
                 download_audio=download_audio,
@@ -253,18 +282,18 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 elif any(name.endswith(f".{x}") for x in transcription.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
                         content = f.read()
-                        content_id = AudioItem.build_content_id("youtube", get_checksum(content), name)
+                        metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
+
+                        checksum = AudioItem.build_checksum(metadata, content)
+                        content_id = AudioItem.build_content_id("youtube", checksum, name)
                         item = AudioItem(path=self.content_path / content_id)
 
-                        metadata = AudioItem.build_metadata(source="youtube", audio_file=name)
                         item.create(metadata)
                         item.audio_path.write_bytes(content)
 
                 elif name.endswith(".srt"):  # youtube.en.srt
                     with open(file_path, "rb") as f:
                         content = f.read()
-                        content_id = SubtitleItem.build_content_id("youtube", get_checksum(content), name)
-                        item = SubtitleItem(path=self.content_path / content_id)
                         flags = set()
 
                         sub_type, lang, _ = name.split(".", maxsplit=2)
@@ -285,6 +314,11 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                             flags=flags,
                             subtitle_file=name,
                         )
+
+                        checksum = SubtitleItem.build_checksum(metadata, content)
+                        content_id = SubtitleItem.build_content_id("youtube", checksum, name)
+                        item = SubtitleItem(path=self.content_path / content_id)
+
                         item.create(metadata)
                         item.subtitle_path.write_bytes(content)
 
@@ -339,103 +373,131 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
     # Pyannote
 
-    def pyannote_diarize_audio(
+    async def pyannote_diarize_audio(
         self,
         *,
-        api_base_url: str,
         checkpoint: str,
-        huggingface_token: str | None = None,
         force: bool = False,
     ) -> None:
         _logger.debug("Diarizing audio for video %s - %s", self.id, self.published_at)
 
-        for audio_item in self.list_content(AudioItem.build_filter()):
-            # check for existing results
+        async with asyncio.TaskGroup() as tg:
+            for audio_item in self.list_content(AudioItem.build_filter()):
+                coro = self._pyannote_diarize_audio_single(
+                    checkpoint=checkpoint,
+                    audio_item=audio_item,
+                    force=force,
+                )
+                tg.create_task(coro)
 
-            dia_items = list(
-                self.list_content(
-                    DiarizationItem.build_filter(
-                        FilterPart(name="source", operator="eq", value="pyannote"),
-                        FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
-                        FilterPart(name="checkpoint", operator="eq", value=checkpoint),
-                    )
+    @with_semaphore(VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT)
+    @logging_with_values(
+        get_context=lambda self, checkpoint, audio_item, *args, **kwargs: [
+            f"video={self.id}",
+            "diarize-audio",
+            # f"dia-checkpoint={checkpoint}",
+            # f"dia-audio={audio_item.content_id}",
+        ]
+    )
+    async def _pyannote_diarize_audio_single(
+        self,
+        *,
+        checkpoint: str,
+        audio_item: AudioItem,
+        force: bool = False,
+    ) -> None:
+        # check for existing results
+
+        dia_items = list(
+            self.list_content(
+                DiarizationItem.build_filter(
+                    FilterPart(name="source", operator="eq", value="pyannote"),
+                    FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
+                    FilterPart(name="checkpoint", operator="eq", value=checkpoint),
                 )
             )
+        )
 
-            if dia_items and not force:
-                continue
+        if dia_items and not force:
+            return
 
-            for dia_item in dia_items:
-                dia_item.path.unlink()
+        for dia_item in dia_items:
+            shutil.rmtree(dia_item.path)
 
-            # diarize audio
+        # diarize audio
 
-            _logger.info(
-                "Starting diarization: video_id=%r, audio_id=%r, checkpoint=%s",
-                self.id,
-                audio_item.content_id,
-                checkpoint,
-            )
+        _logger.info(
+            "Starting diarization: video_id=%r, audio_id=%r, checkpoint=%s",
+            self.id,
+            audio_item.content_id,
+            checkpoint,
+        )
 
-            start_time = time.time()
-            dia = diarization.audio_to_diarization_response(
-                path=audio_item.audio_path,
-                api_base_url=api_base_url,
-                checkpoint=checkpoint,
-                huggingface_token=huggingface_token,
-            )
-            end_time = time.time()
+        start_time = time.time()
+        dia = await diarization.audio_to_diarization_response(
+            path=audio_item.audio_path,
+            checkpoint=checkpoint,
+        )
+        end_time = time.time()
 
-            _logger.info("Diarization finished in %i seconds", end_time - start_time)
+        _logger.info("Diarization finished in %i seconds", end_time - start_time)
 
-            # save diarization file
+        # save diarization file
 
-            checksum = get_checksum(json.dumps(dia.model_dump(mode="json"), sort_keys=True).encode("utf-8"))
-            content_id = DiarizationItem.build_content_id("pyannote", checksum)
-            item = DiarizationItem(path=self.content_path / content_id)
+        metadata = DiarizationItem.build_metadata(
+            source="pyannote",
+            audio_id=audio_item.content_id,
+        )
 
-            metadata = DiarizationItem.build_metadata(
-                source="pyannote",
-                audio_id=audio_item.content_id,
-            )
-            item.create(metadata)
-            item.save_diarization(dia)
+        checksum = DiarizationItem.build_checksum(metadata, dia)
+        content_id = DiarizationItem.build_content_id("pyannote", checksum)
+        item = DiarizationItem(path=self.content_path / content_id)
+
+        item.create(metadata)
+        item.save_diarization(dia)
 
     # Whisper
 
-    def whisper_transcribe_audio(
+    async def whisper_transcribe_audio(
         self,
         *,
-        api_base_url: str,
-        api_key: str,
         model: str,
         langs: set[str],  # can have special MULTI_LANG value
         force: bool = False,
     ) -> None:
         _logger.debug("Transcribing audio for video %s - %s", self.id, self.published_at)
 
-        for audio_item in self.list_content(AudioItem.build_filter()):
-            for diarization_item in self.list_content(
-                DiarizationItem.build_filter(
-                    FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
-                )
-            ):
-                for lang in langs:
-                    self._whisper_transcribe_audio_to_lang(
-                        api_base_url=api_base_url,
-                        api_key=api_key,
-                        model=model,
-                        lang=lang,
-                        audio_item=audio_item,
-                        diarization_item=diarization_item,
-                        force=force,
+        async with asyncio.TaskGroup() as tg:
+            for audio_item in self.list_content(AudioItem.build_filter()):
+                for diarization_item in self.list_content(
+                    DiarizationItem.build_filter(
+                        FilterPart(name="audio_id", operator="eq", value=audio_item.content_id),
                     )
+                ):
+                    for lang in langs:
+                        coro = self._whisper_transcribe_audio_single(
+                            model=model,
+                            lang=lang,
+                            audio_item=audio_item,
+                            diarization_item=diarization_item,
+                            force=force,
+                        )
+                        tg.create_task(coro)
 
-    def _whisper_transcribe_audio_to_lang(
+    @with_semaphore(VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT)
+    @logging_with_values(
+        get_context=lambda self, model, lang, audio_item, diarization_item, *args, **kwargs: [
+            f"video={self.id}",
+            "transcribe-audio",
+            # f"tx-model={model}",
+            f"tx-lang={lang}",
+            # f"tx-audio={audio_item.content_id}",
+            # f"tx-dia={diarization_item.content_id}",
+        ]
+    )
+    async def _whisper_transcribe_audio_single(
         self,
         *,
-        api_base_url: str,
-        api_key: str,
         model: str,
         lang: str,  # can have special MULTI_LANG value
         audio_item: AudioItem,
@@ -460,7 +522,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             return
 
         for sub_item in sub_items:
-            sub_item.path.unlink()
+            shutil.rmtree(sub_item.path)
 
         # transcribe the audio into SRT format
 
@@ -474,11 +536,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         )
         start_time = time.time()
 
-        tx = transcription.transcribe_diarized_audio(
+        tx = await transcription.transcribe_diarized_audio(
             file=audio_item.audio_path,
             dia=diarization_item.load_diarization(),
-            api_base_url=api_base_url,
-            api_key=api_key,
             model=model,
             lang=None if lang == MULTI_LANG else lang,
         )
@@ -490,25 +550,11 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         # save subtitle file
         # - keeps transcriptions from different models and for different languages
 
-        checksum = get_checksum(
-            str(
-                [
-                    audio_item.content_id,
-                    diarization_item.content_id,
-                    model,
-                    content,
-                ]
-            ).encode("utf-8")
-        )
-
-        name = f"transcription.{lang}.json"
-        content_id = SubtitleItem.build_content_id("whisper", checksum, name)
-        item = SubtitleItem(path=self.content_path / content_id)
-
         flags = {Flags.SUBTITLE_TRANSCRIPTION}
         if lang != MULTI_LANG:
             flags.add(Flags.SUBTITLE_TRANSLATION)
 
+        name = f"transcription.{lang}.json"
         metadata = SubtitleItem.build_metadata(
             source="whisper",
             lang=lang,
@@ -519,6 +565,10 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             diarization_id=diarization_item.content_id,
             whisper_model=model,
         )
+
+        checksum = DiarizationItem.build_checksum(metadata, content)
+        content_id = SubtitleItem.build_content_id("whisper", checksum, name)
+        item = SubtitleItem(path=self.content_path / content_id)
 
         item.create(metadata)
         item.subtitle_path.write_text(content)
