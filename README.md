@@ -110,7 +110,7 @@ Detecting which parts of the audio file contain speech, is needed to prevent hal
     docker compose up faster-whisper-server-cuda
     ```
     
-    Alternatively, you should be able to use the Whisper from official OpenAI API with `WHISPER_BASE_URL`, `WHISPER_API_KEY` ENVs and `--whisper-model` parameter.
+    Alternatively, you should be able to use the Whisper from official OpenAI API with `WHISPER_BASE_URLS`, `WHISPER_API_KEYS` ENVs and `--whisper-model` parameter.
 
 
 - Transcribe the audio files into subtitles
