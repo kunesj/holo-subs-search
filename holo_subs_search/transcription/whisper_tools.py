@@ -5,11 +5,13 @@ import io
 import itertools
 import logging
 import pathlib
+import tempfile
 from typing import TYPE_CHECKING
 
+# noinspection PyPackageRequirements
+import ffmpeg  # ffmpeg-python
 import openai
 import openai.types.audio
-import pydub
 
 from ..env_config import (
     VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
@@ -25,12 +27,15 @@ if TYPE_CHECKING:
     from ..diarization import Diarization
 
 _logger = logging.getLogger(__name__)
+
 WHISPER_API_SEMAPHORES = [CounterSemaphore(n) for n in WHISPER_PARALLEL_COUNTS]
 # Same as sum of `WHISPER_API_SEMAPHORES`, to not queue chunks before we know which server/device will be free next
 WHISPER_CHUNK_SEMAPHORE = CounterSemaphore(sum(WHISPER_PARALLEL_COUNTS))
 # Usually, it does not make sense for this to be more than 1, because one diarized transcription can generate many
 # concurrent api calls. So we default it to number of videos we want to transcribe concurrently. That should also be 1.
 WHISPER_DIARIZED_SEMAPHORE = CounterSemaphore(VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT)
+
+FFMPEG_CHUNK_SEMAPHORE = CounterSemaphore(4)
 
 # Audio formats that are supported by Whisper
 WHISPER_AUDIO_FORMATS = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
@@ -103,46 +108,74 @@ async def transcribe_diarized_audio(
     _logger.info("Converting diarization to voice activity...")
     chunks, dia2va_params = await asyncio.to_thread(diarization_to_voice_activity, dia)
 
-    # prepare audio
+    # transcription
 
-    _logger.info("Loading audio into pydub.AudioSegment...")
-    audio = await asyncio.to_thread(lambda: pydub.AudioSegment.from_file(file))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # prepare source file
 
-    # transcribe chunks
+        if isinstance(file, io.BytesIO):
+            _logger.info("Writing temp audio file...")
+            file_path = pathlib.Path(tmpdir) / "source.audio"
+            file.seek(0)
+            file_path.write_bytes(file.read())
+        elif isinstance(file, bytes):
+            _logger.info("Writing temp audio file...")
+            file_path = pathlib.Path(tmpdir) / "source.audio"
+            file_path.write_bytes(file)
+        elif isinstance(file, pathlib.Path):
+            file_path = file
+        else:
+            raise ValueError()
 
-    _logger.info("Transcribing %r audio chunks...", len(chunks))
+        # transcribe chunks
 
-    @with_semaphore(WHISPER_CHUNK_SEMAPHORE)
-    async def _transcribe_chunk(chunks: list[VoiceActivityChunk], idx: int, lang: str | None = None) -> Transcription:
-        chunk = chunks[idx]
-        _logger.info("Chunk %r/%r: %r", idx + 1, len(chunks), chunk)
+        _logger.info("Transcribing %r audio chunks...", len(chunks))
 
-        file_segment = io.BytesIO()
-        audio[chunk.start * 1000 : chunk.end * 1000].export(file_segment, format="wav")
+        @with_semaphore(WHISPER_CHUNK_SEMAPHORE)
+        async def _transcribe_chunk(
+            chunks: list[VoiceActivityChunk], idx: int, lang: str | None = None
+        ) -> Transcription:
+            chunk = chunks[idx]
+            _logger.info("Chunk %r/%r: %r", idx + 1, len(chunks), chunk)
 
-        tx = await transcribe_audio(
-            file=file_segment,
-            model=model,
-            lang=lang,
-            prompt=prompt,
-            temperature=temperature,
-            timeout=timeout,
-        )
+            # create audio chunk
 
-        # make start/end absolute
-        for tx_segment in tx.segments:
-            tx_segment.start += chunk.start
-            tx_segment.end += chunk.start
+            chunk_path = pathlib.Path(tmpdir) / f"chunk-{idx}.wav"
 
-        _logger.debug("Transcription %r/%r: %r", idx + 1, len(chunks), tx)
-        return tx
+            stream = ffmpeg.input(
+                str(file_path), ss=chunk.start, to=chunk.end, accurate_seek=None, hide_banner=None, loglevel="error"
+            )
+            stream = ffmpeg.output(stream, str(chunk_path), format="wav")
+            await asyncio.to_thread(lambda: ffmpeg.run(stream))
 
-    tasks = []
-    async with asyncio.TaskGroup() as tg:
-        for idx in range(len(chunks)):
-            coro = _transcribe_chunk(chunks, idx, lang=lang)
-            tasks.append(tg.create_task(coro))
-    chunk_txs = [task.result() for task in tasks]
+            audio_chunk = io.BytesIO(chunk_path.read_bytes())
+
+            # transcribe the chunk
+
+            tx = await transcribe_audio(
+                file=audio_chunk,
+                model=model,
+                lang=lang,
+                prompt=prompt,
+                temperature=temperature,
+                timeout=timeout,
+            )
+
+            # make start/end absolute
+
+            for tx_segment in tx.segments:
+                tx_segment.start += chunk.start
+                tx_segment.end += chunk.start
+
+            _logger.debug("Transcription %r/%r: %r", idx + 1, len(chunks), tx)
+            return tx
+
+        chunk_tasks = []
+        async with asyncio.TaskGroup() as tg:
+            for idx in range(len(chunks)):
+                coro = _transcribe_chunk(chunks, idx, lang=lang)
+                chunk_tasks.append(tg.create_task(coro))
+        chunk_txs = [task.result() for task in chunk_tasks]
 
     _logger.info("Progress: DONE")
 
