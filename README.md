@@ -70,7 +70,7 @@ See [env_config.py](./holo_subs_search/env_config.py) for configurable ENV varia
 
 Some videos completely lack subtitles or the subtitles are VERY bad. In this case, you can try to download the audio and transcribe it yourself. The results can be better or worse depending on a lot of variables.
 
-Most of these steps assume that you have Docker with support for Nvidia GPU installed, and a relatively powerful/new Nvidia GPU (like RTX 3090). 
+Most of these steps assume that you have Docker with support for Nvidia GPU installed, a relatively powerful/new Nvidia GPU (like RTX 3090), and at least 64GB RAM (for loading long audio to memory). 
 Everything should also be able to run on CPU, but you would have use the `*-cpu` containers, and it would be a lot slower.
 
 Check [PERFORMANCE.md](./PERFORMANCE.md) if you are currious about how long this can take.

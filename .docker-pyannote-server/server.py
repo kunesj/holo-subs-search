@@ -11,10 +11,10 @@ from typing import Annotated, cast
 
 import numpy
 import pyannote.audio
-import pydub
 import torch
 import torchaudio
 from fastapi import FastAPI, HTTPException, Query, Response, UploadFile
+from pyannote.audio.core.io import AudioFile
 from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
 
 SpeakerEmbeddingsType = dict[str, list[float]]
@@ -165,11 +165,10 @@ def _load_diarization_pipeline(
 
 def _run_diarization_pipeline(
     pipeline: SpeakerDiarization,
-    wav_stream: io.BytesIO,
+    audio: AudioFile,
 ) -> tuple[list[DiarizationSegment], SpeakerEmbeddingsType]:
     _logger.info("Diarizating audio file...")
-    waveform, sample_rate = torchaudio.load(wav_stream)
-    diarization, raw_embeddings = pipeline({"waveform": waveform, "sample_rate": sample_rate}, return_embeddings=True)
+    diarization, raw_embeddings = pipeline(audio, return_embeddings=True)
 
     _logger.info("Reading segments...")
     segments = [
@@ -189,7 +188,7 @@ def _run_diarization_pipeline(
 
 async def run_diarization_on_device(
     device: str,
-    wav_stream: io.BytesIO,
+    audio: AudioFile,
     checkpoint: str,
     huggingface_token: str | None = None,
 ) -> Diarization:
@@ -218,9 +217,7 @@ async def run_diarization_on_device(
 
         # run diarization
 
-        segments, embeddings = await asyncio.to_thread(
-            _run_diarization_pipeline, pipeline=state.pipeline, wav_stream=wav_stream
-        )
+        segments, embeddings = await asyncio.to_thread(_run_diarization_pipeline, pipeline=state.pipeline, audio=audio)
 
         # return diarization object
 
@@ -253,33 +250,20 @@ def get_next_device() -> str:
 
 
 # endregion
-# ============================= DIARIZATION ===============================
+# ============================= AUDIO ===============================
 # region
 
 
-def _audio_to_wav(source: io.BytesIO, name: str) -> io.BytesIO:
-    _logger.info("Converting audio to wav: %s", name)
-
-    sound = pydub.AudioSegment.from_file(source, name.split(".")[-1])
-    wav_stream = io.BytesIO()
-    sound.export(wav_stream, format="wav")
-
-    wav_stream.seek(0)
-    return wav_stream
-
-
-async def file_to_wav(file: UploadFile) -> io.BytesIO:
+async def file_to_audio(file: UploadFile) -> AudioFile:
     """
-    NOTE: Loading audio into memory speeds up the diarization.
+    NOTE:
+    - Loading audio into memory speeds up the diarization.
+    - wav files can't be larger than 4GB, so we must never convert to than format in any step. (can't use pydub)
     """
+    _logger.info("Loading audio: %s", file.filename)
     stream = io.BytesIO(await file.read())
-    name = file.filename
-
-    if not name.endswith(".wav"):
-        async with AUDIO_SEMAPHORE:
-            stream = await asyncio.to_thread(_audio_to_wav, source=stream, name=name)
-
-    return stream
+    waveform, sample_rate = torchaudio.load(stream, format=file.filename.split(".")[-1])
+    return {"waveform": waveform, "sample_rate": sample_rate}
 
 
 # endregion
@@ -328,10 +312,12 @@ async def diarization(
     >>> distance = cdist(embedding1, embedding2, metric="cosine")
     """
     async with DIARIZATION_SEMAPHORE:
-        wav_stream = await file_to_wav(file)
+        # the audio conversion is not directly in the parameters, because we want to get output of get_next_device()
+        # just before calling the diarization.
+        audio = await file_to_audio(file)
         return await run_diarization_on_device(
             device=get_next_device(),
-            wav_stream=wav_stream,
+            audio=audio,
             checkpoint=checkpoint,
             huggingface_token=huggingface_token,
         )

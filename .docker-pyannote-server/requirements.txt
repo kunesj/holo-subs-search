@@ -6,7 +6,6 @@ requests==2.32.3
 # ai
 
 pyannote.audio==3.3.2
-pydub==0.25.1
 
 transformers==4.44.2
 accelerate==0.34.2
