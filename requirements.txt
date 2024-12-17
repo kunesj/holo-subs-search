@@ -7,3 +7,4 @@ ffmpeg-python==0.2.0
 pydantic>=2.8.2,<3.0.0
 openai==1.57.4
 aiohttp==3.11.10
+aiofiles==24.1.0
