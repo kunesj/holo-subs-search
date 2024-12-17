@@ -5,20 +5,19 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 import pathlib
 import tempfile
+import time
 from typing import AsyncIterator, Literal, Self
 
-import aiofiles
 import aiohttp
+
+from .env_config import RAGTAG_ALLOW_UNSUPPORTED_FILES, RAGTAG_PARALLEL_COUNT
 
 RagtagFileType = Literal["ragtag", "info", "chat", "video-only", "audio-only", "video", "thumbnail", "unsupported"]
 
 _logger = logging.getLogger(__name__)
-
-REGTAG_SEMAPHORE = asyncio.Semaphore(1)
-RAGTAG_ALLOW_UNSUPPORTED_FILES = bool(os.getenv("RAGTAG_ALLOW_UNSUPPORTED_FILES", ""))
+RAGTAG_SEMAPHORE = asyncio.Semaphore(RAGTAG_PARALLEL_COUNT)
 
 
 class RagtagError(Exception):
@@ -41,7 +40,11 @@ class RagtagFile:
     def from_hit(cls: type[Self], hit: dict) -> list[Self]:
         video_id = hit["_id"]
         source = hit["_source"]
+
         drive_base = source["drive_base"]
+        if ":" not in drive_base:
+            _logger.debug("':' not found in drive base, prefixing with 'gd:'")
+            drive_base = f"gd:{drive_base}"
 
         # https://gist.github.com/AgentOak/34d47c65b1d28829bb17c24c04a0096f
         format_id = source["format_id"]  # 303+251
@@ -49,30 +52,45 @@ class RagtagFile:
 
         file_list = []
         for file_info in source["files"]:
-            file_name = file_info["name"]
+            file_name = saved_name = file_info["name"]
 
             if file_name.endswith(".info.json"):
                 file_type: RagtagFileType = "info"
-            elif file_name.endswith(".chat.json") or file_name.endswith(".live_chat.json"):
+
+            # *.chat.json
+            # *.live_chat.json
+            # gCbWO-u0CR0.live_chat.json.part-Frag0
+            # gCbWO-u0CR0.live_chat.json.part
+            elif ".chat.json" in file_name or ".live_chat.json" in file_name:
                 file_type = "chat"
+
             elif file_name.startswith(f"{video_id}.f{video_format_id}."):  # usually .webm
                 file_type = "video-only"
+
             elif file_name.startswith(f"{video_id}.f{audio_format_id}."):  # usually .webm
                 file_type = "audio-only"
+
             elif file_name in (f"{video_id}.webm", f"{video_id}.mp4", f"{video_id}.mkv"):
                 file_type = "video"
+                if format_id not in file_name:
+                    saved_name_parts = file_name.split(".")
+                    saved_name_parts[-1:-1] = [format_id]
+                    saved_name = ".".join(saved_name_parts)
+
             elif any(file_name.endswith(x) for x in (".webp", ".jpg", ".png")):
                 file_type = "thumbnail"
+
             elif RAGTAG_ALLOW_UNSUPPORTED_FILES:
                 _logger.error("Unsupported file: %s: %s", video_id, file_name)
                 file_type = "unsupported"
+
             else:
                 raise ValueError("Unsupported ragtag file", video_id, file_name)
 
             file_list.append(
                 cls(
                     file_type=file_type,
-                    file_name=file_name,
+                    file_name=saved_name,
                     file_size=file_info.get("size"),
                     url=f"https://content.archive.ragtag.moe/{drive_base}/{video_id}/{file_name}",
                 )
@@ -81,7 +99,6 @@ class RagtagFile:
         return file_list
 
 
-# FIXME: use this if youtube video is unavailable or privated
 async def download_video(
     *,
     video_id: str,
@@ -89,20 +106,7 @@ async def download_video(
     download_chat: bool = False,
     timeout: aiohttp.ClientTimeout | None = None,
 ) -> AsyncIterator[RagtagFile]:
-    """
-    Examples of returned filenames:
-        info.json
-        proper.en.srt
-        transcription.en.srt
-        translation.en.srt
-        f123.m4a
-    """
-    # download_subtitles = download_subtitles or []
-    # done_subtitles: dict[str, tuple[str, pathlib.Path]] = {}
-
-    async with aiohttp.ClientSession() as session:
-        # get ragtag info.json
-
+    async with RAGTAG_SEMAPHORE, aiohttp.ClientSession() as session:
         response = await session.get(
             url="https://archive.ragtag.moe/api/v1/search",
             params={"v": video_id},
@@ -165,9 +169,24 @@ async def download_video(
                 response.raise_for_status()
 
                 file_path = tmpdir_path / ragtag_file.file_name
-                async for data in response.content.iter_chunked(2 * 25):  # 32Mb
-                    async with aiofiles.open(file_path, "ba") as f:
-                        await f.write(data)
+                downloaded_size = 0
+                last_log = 0.0
+
+                with file_path.open("wb") as f:
+                    async for data in response.content.iter_chunked(2**25):  # 32Mb
+                        downloaded_size += len(data)
+
+                        if (time.time() - last_log) > 1.0 or downloaded_size == ragtag_file.file_size:
+                            _logger.info(
+                                "Downloaded %s%%, %s/%s",
+                                round((downloaded_size / ragtag_file.file_size) * 100, 2),
+                                downloaded_size,
+                                ragtag_file.file_size,
+                            )
+                            last_log = time.time()
+
+                        f.write(data)
+
                 ragtag_file.path = file_path
 
             # yield results

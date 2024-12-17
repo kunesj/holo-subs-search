@@ -4,27 +4,31 @@ import asyncio
 import datetime
 import json
 import logging
+import pathlib
 import shutil
+import tempfile
 import time
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
-from .. import diarization, transcription, ydl_tools
+from .. import diarization, ffmpeg_tools, ragtag_tools, transcription, ydl_tools
 from ..env_config import (
+    VIDEO_FETCH_RAGTAG_PARALLEL_COUNT,
     VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT,
     VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT,
     VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
 )
 from ..logging_config import logging_with_values
-from ..utils import AwareDateTime, get_checksum, json_dumps, with_semaphore
+from ..utils import AwareDateTime, json_dumps, with_semaphore
 from .content_item import MULTI_LANG, AudioItem, DiarizationItem, SubtitleItem
 from .mixins.content_mixin import ContentMixin
 from .mixins.filterable_mixin import FilterPart
 from .mixins.flags_mixin import Flags, FlagsMixin
 from .mixins.holodex_mixin import HolodexMixin
+from .mixins.ragtag_mixin import RagtagMixin
 from .record import Record
 
 if TYPE_CHECKING:
@@ -35,10 +39,12 @@ SubtitlesState = Literal["missing", "garbage"]
 _logger = logging.getLogger(__name__)
 
 
-class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
+class VideoRecord(ContentMixin, RagtagMixin, HolodexMixin, FlagsMixin, Record):
+    RAGTAG_JSON: ClassVar[str] = "ragtag.json"
     model_name = "video"
 
-    # Fields
+    # ==================================== Fields ====================================
+    # region
 
     @property
     def channel_id(self) -> str:
@@ -58,7 +64,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
     def youtube_subtitles(self, value: dict[str, SubtitlesState]) -> None:
         self.metadata = dict(self.metadata, youtube_subtitles=value)
 
-    # Computed properties
+    # endregion
+    # ==================================== Computed properties ====================================
+    # region
 
     @property
     def published_at(self) -> AwareDateTime | None:
@@ -100,11 +108,19 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             return f"https://holodex.net/watch/{self.holodex_id}"
         return None
 
-    # Methods
+    # endregion
+    # ==================================== Methods ====================================
+    # region
 
     def save_json_file(self, name: str, value: dict[str, Any] | None) -> None:
         super().save_json_file(name, value)
 
+        # trim down the info.json to only useful data
+        if name == self.YOUTUBE_JSON:
+            for key in ["formats", "automatic_captions", "subtitles", "thumbnails", "heatmap"]:
+                value.pop(key, None)
+
+        # update flags from metadata
         if name in (self.HOLODEX_JSON, self.YOUTUBE_JSON):
             flags = {*self.flags}
 
@@ -181,7 +197,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         elif not is_ignored and gitignore_path.exists():
             gitignore_path.unlink()
 
-    # Youtube
+    # endregion
+    # ==================================== Youtube ====================================
+    # region
 
     async def fetch_youtube(
         self,
@@ -217,6 +235,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
     ) -> None:
         # check if video can be accessed
 
+        if not self.youtube_id:
+            return
+
         if not force:
             if Flags.YOUTUBE_PRIVATE in self.flags:
                 return
@@ -241,13 +262,10 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
             download_subtitles = list(fetch_langs)
 
         # calculate if audio should be downloaded
+        # - we don't care about the source. if any audio is downloaded, skip this.
 
         if download_audio and not force:
-            download_audio = not bool(
-                list(
-                    self.list_content(AudioItem.build_filter(FilterPart(name="source", operator="eq", value="youtube")))
-                )
-            )
+            download_audio = not bool(list(self.list_content(AudioItem.build_filter())))
 
         # fetch content
 
@@ -271,13 +289,7 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 if name == "info.json":
                     if not self.youtube_info or Flags.YOUTUBE_PRESERVE not in self.flags:
                         with open(file_path, "r") as f:
-                            info = json.loads(f.read())
-
-                            # trim down the info to only useful data
-                            for key in ["formats", "automatic_captions", "subtitles", "thumbnails", "heatmap"]:
-                                info.pop(key, None)
-
-                            self.youtube_info = info
+                            self.youtube_info = json.loads(f.read())
 
                 elif any(name.endswith(f".{x}") for x in transcription.WHISPER_AUDIO_FORMATS):
                     with open(file_path, "rb") as f:
@@ -371,7 +383,97 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
                 )
                 self.youtube_subtitles = dict(self.youtube_subtitles) | {lang: "missing" for lang in missing_langs}
 
-    # Pyannote
+    # endregion
+    # ==================================== archive.ragtag.moe ====================================
+    # region
+
+    async def fetch_ragtag(self, *, download_audio: bool = False, force: bool = False) -> None:
+        _logger.debug("Fetching Ragtag audio for video %s - %s", self.id, self.published_at)
+
+        async with asyncio.TaskGroup() as tg:
+            coro = self._fetch_ragtag_single(
+                download_audio=download_audio,
+                force=force,
+            )
+            tg.create_task(coro)
+
+    @with_semaphore(VIDEO_FETCH_RAGTAG_PARALLEL_COUNT)
+    @logging_with_values(get_context=lambda self, *args, **kwargs: [f"video={self.id}", "fetch-ragtag"])
+    async def _fetch_ragtag_single(self, *, download_audio: bool = False, force: bool = False) -> None:
+        # check if video can be processed
+
+        if not self.youtube_id:
+            return
+
+        if not (self.flags & {Flags.YOUTUBE_PRIVATE, Flags.YOUTUBE_UNAVAILABLE}):
+            # video available on YouTube, don't put any unnecessary traffic on archive
+            return
+
+        if Flags.RAGTAG_UNAVAILABLE in self.flags and not force:
+            return
+
+        # calculate if audio should be downloaded
+        # - we don't care about the source. if any audio is downloaded, skip this.
+
+        if download_audio and not force:
+            download_audio = not bool(list(self.list_content(AudioItem.build_filter())))
+
+        # fetch content
+
+        if not download_audio:
+            return
+
+        _logger.info(
+            "Fetching Ragtag video: video_id=%r, published_at=%r, download_audio=%r",
+            self.id,
+            self.published_at,
+            download_audio,
+        )
+
+        try:
+            async for ragtag_file in ragtag_tools.download_video(
+                video_id=self.youtube_id, download_audio=download_audio
+            ):
+                match ragtag_file.file_type:
+                    case "ragtag":
+                        self.ragtag_info = json.loads(ragtag_file.path.read_text())
+
+                    case "info":
+                        if self.youtube_info:
+                            _logger.info("Keeping original YT info.json: %s", self.id)
+                        else:
+                            self.youtube_info = json.loads(ragtag_file.path.read_text())
+
+                    case "audio-only" | "video":
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            if ragtag_file.file_type == "video":
+                                audio_name = ".".join(["audio-only", *ragtag_file.file_name.split(".")[:-1], "webm"])
+                                audio_path = pathlib.Path(tmpdir) / audio_name
+                                await ffmpeg_tools.extract_audio(ragtag_file.path, audio_path)
+                            else:
+                                audio_name = ragtag_file.file_name
+                                audio_path = ragtag_file.path
+
+                            content = audio_path.read_bytes()
+                            metadata = AudioItem.build_metadata(source="ragtag", audio_file=audio_name)
+
+                            checksum = AudioItem.build_checksum(metadata, content)
+                            content_id = AudioItem.build_content_id("ragtag", checksum, audio_name)
+                            item = AudioItem(path=self.content_path / content_id)
+
+                            item.create(metadata)
+                            item.audio_path.write_bytes(content)
+
+                    case _:
+                        _logger.warning("Fetched unexpected file: %s", ragtag_file)
+
+        except ragtag_tools.RagtagNotFound as e:
+            _logger.info("Video not available in archive.ragtag.moe: %s", self.id)
+            self.flags |= {*self.flags, Flags.RAGTAG_UNAVAILABLE}
+
+    # endregion
+    # ==================================== Pyannote ====================================
+    # region
 
     async def pyannote_diarize_audio(
         self,
@@ -456,7 +558,9 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
         item.create(metadata)
         item.save_diarization(dia)
 
-    # Whisper
+    # endregion
+    # ==================================== Whisper ====================================
+    # region
 
     async def whisper_transcribe_audio(
         self,
@@ -572,6 +676,8 @@ class VideoRecord(ContentMixin, HolodexMixin, FlagsMixin, Record):
 
         item.create(metadata)
         item.subtitle_path.write_text(content)
+
+    # endregion
 
 
 # Following imports must be at the end of file to prevent cyclic import error

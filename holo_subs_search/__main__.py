@@ -103,6 +103,7 @@ def _search_video_subtitles(
 @logging_with_values(get_context=lambda args, video, *_, **__: [f"video={video.id}"])
 async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
     # fetching YouTube content
+    # - fallback to archives if YT is unavailable or privated
 
     if args.youtube_fetch_subtitles or args.youtube_fetch_audio and video.youtube_id:
         await video.fetch_youtube(
@@ -111,6 +112,13 @@ async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
             cookies_from_browser=args.youtube_cookies_from_browser,
             memberships=args.youtube_memberships,
             force=args.youtube_force,
+        )
+        video.update_gitignore()
+
+    if args.ragtag_fetch_audio and video.youtube_id:
+        await video.fetch_ragtag(
+            download_audio=args.ragtag_fetch_audio,
+            force=args.ragtag_force,
         )
         video.update_gitignore()
 
@@ -140,12 +148,20 @@ async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
             _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
             shutil.rmtree(audio_item.path)
 
+    if args.ragtag_clear_audio:
+        for audio_item in video.list_content(
+            AudioItem.build_filter(FilterPart(name="source", operator="eq", value="ragtag"))
+        ):
+            _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
+            shutil.rmtree(audio_item.path)
+
 
 # flake8: noqa: C801
 async def main() -> None:
     # parse arguments
 
     parser = argparse.ArgumentParser()
+    # region
     parser.add_argument(
         "--storage",
         default=DEFAULT_STORAGE_PATH,
@@ -166,6 +182,22 @@ async def main() -> None:
         default=20,
         help="Set global debug level [CRITICAL=50, ERROR=40, WARNING=30, INFO=20, DEBUG=10, SPAM=1]",
     )
+    parser.add_argument(
+        "--channel-filter",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--channel-filter id:eq:***** flags:excludes:****` Can be used to limit what channels are processed. "
+        "Used only when refreshing channels or video lists.",
+    )
+    parser.add_argument(
+        "--video-filter",
+        nargs="+",
+        type=str,
+        default=[],
+        help="`--video-filter id:eq:***** flags:excludes:****` Can be used to limit what videos are processed",
+    )
+    # endregion
     # ---- fetching metadata ----
     parser.add_argument(
         "--fetch-org-channels",
@@ -184,23 +216,8 @@ async def main() -> None:
         action="store_true",
         help="If already stored Holodex/Youtube/... info should be updated",
     )
-    # ---- record filters ----
-    parser.add_argument(
-        "--channel-filter",
-        nargs="+",
-        type=str,
-        default=[],
-        help="`--channel-filter id:eq:***** flags:excludes:****` Can be used to limit what channels are processed. "
-        "Used only when refreshing channels or video lists.",
-    )
-    parser.add_argument(
-        "--video-filter",
-        nargs="+",
-        type=str,
-        default=[],
-        help="`--video-filter id:eq:***** flags:excludes:****` Can be used to limit what videos are processed",
-    )
     # ---- YouTube ----
+    # region
     parser.add_argument(
         "--youtube-memberships",
         nargs="+",
@@ -231,14 +248,35 @@ async def main() -> None:
     parser.add_argument(
         "--youtube-clear-audio",
         action="store_true",
-        help="Delete downloaded youtube audio after it has been processed",
+        help="Delete downloaded youtube audio",
     )
     parser.add_argument(
         "--youtube-force",
         action="store_true",
         help="Don't skip already processed or unavailable items",
     )
+    # endregion
+    # ---- Ragtag Archive (ragtag.moe) ----
+    # region
+    parser.add_argument(
+        "--ragtag-fetch-audio",
+        action="store_true",
+        help="Will try to fetch unavailable videos from Ragtag Archive. "
+        "Videos without `youtube-unavailable` or `youtube-private` flags are automatically skipped.",
+    )
+    parser.add_argument(
+        "--ragtag-clear-audio",
+        action="store_true",
+        help="Delete downloaded ragtag audio",
+    )
+    parser.add_argument(
+        "--ragtag-force",
+        action="store_true",
+        help="Don't skip already processed or unavailable items",
+    )
+    # endregion
     # ---- Pyannote ----
+    # region
     parser.add_argument(
         "--pyannote-diarize-audio",
         action="store_true",
@@ -252,7 +290,9 @@ async def main() -> None:
         action="store_true",
         help="Don't skip already processed items",
     )
+    # endregion
     # ---- Whisper ----
+    # region
     parser.add_argument(
         "--whisper-transcribe-audio",
         action="store_true",
@@ -282,7 +322,9 @@ async def main() -> None:
         action="store_true",
         help="Don't skip already processed items",
     )
+    # endregion
     # ---- search subtitles ----
+    # region
     parser.add_argument(
         "--search",
         default=None,
@@ -298,6 +340,7 @@ async def main() -> None:
         default=["langs:includes:en"],
         help="`--search-subtitle-filter source:eq:youtube langs:includes:en`",
     )
+    # endregion
     args = parser.parse_args()
 
     # logger configuration

@@ -29,6 +29,9 @@ class Flags:
     # content is accessible only by signed in accounts with confirmed age
     YOUTUBE_AGE_RESTRICTED = "youtube-age-restricted"
 
+    # content is not available in ragtag.moe archive
+    RAGTAG_UNAVAILABLE = "ragtag-unavailable"
+
     # flags of SubtitleItem objects
     SUBTITLE_TRANSCRIPTION = "transcription"
     SUBTITLE_TRANSLATION = "translation"
