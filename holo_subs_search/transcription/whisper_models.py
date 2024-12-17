@@ -51,6 +51,10 @@ def model_size_and_audio_lang_to_model(model_size: ModelSize, audio_lang: str | 
             return "Systran/faster-whisper-medium"
 
         case "large", _:
+            # Don't use turbo version if you can, it has some degradation:
+            #   https://github.com/SYSTRAN/faster-whisper/issues/1025#issuecomment-2387828445
+            #   "Across languages, the turbo model performs similarly to large-v2,
+            #   though it shows larger degradation on some languages like Thai and Cantonese."
             return "Systran/faster-whisper-large-v3"
 
     raise ValueError("No matching model found")
