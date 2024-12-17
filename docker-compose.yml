@@ -1,33 +1,46 @@
 services:
-  faster-whisper-server-cuda:
+  # ================================ Whisper-CUDA ================================
+  # - using separate server for each GPU for better compatibility with different GPUs
+
+  .faster-whisper-server-cuda:
     image: fedirz/faster-whisper-server:latest-cuda
     restart: unless-stopped
-    ports:
-      - 8000:8000
+    profiles: ["NEVER"]
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
-    environment:
-      # https://github.com/fedirz/faster-whisper-server/blob/master/src/faster_whisper_server/config.py
-      # Set to [0,1] if you want to use two GPU, [0,1,2] for three, etc.
-      # Trying to load Whisper twice on one gpu with [0,0] slows it down! Don't do it.
-      - WHISPER__DEVICE_INDEX=[0]
+#    environment:
+#      # https://github.com/fedirz/faster-whisper-server/blob/master/src/faster_whisper_server/config.py
+#      # Set to [0,1] if you want to use two GPU, [0,1,2] for three, etc.
+#      # Trying to load Whisper twice on one gpu with [0,0] slows it down! Don't do it.
+#      # Works only if all GPUs have the same compute capabilities!
+#      - WHISPER__DEVICE_INDEX=[0]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: []
+              #count: all
+              capabilities: [gpu]
+
+  faster-whisper-server-cuda:
+    extends: .faster-whisper-server-cuda
+    profiles: ["cuda", "cuda2x"]
+    ports:
+      - 8000:8000
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               device_ids: ['0']
-              #count: all
               capabilities: [gpu]
 
-  # Deploy together with first container if you need to use second GPU with different CUDA version
-  faster-whisper-server-cuda-2:
-    image: fedirz/faster-whisper-server:latest-cuda
-    restart: unless-stopped
+  faster-whisper-server-cuda2x:
+    extends: .faster-whisper-server-cuda
+    profiles: ["cuda2x"]
     ports:
       - 8001:8000
-    volumes:
-      - hugging_face_cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -36,13 +49,19 @@ services:
               device_ids: ['1']
               capabilities: [gpu]
 
+  # ================================ Whisper-CPU ================================
+
   faster-whisper-server-cpu:
     image: fedirz/faster-whisper-server:latest-cpu
     restart: unless-stopped
+    profiles: ["cpu"]
     ports:
       - 8000:8000
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
+
+  # ================================ Pyannote-CUDA ================================
+  # - one server should be enough for all GPUs
 
   pyannote-server-cuda:
     image: local/pyannote-server:latest-cuda
@@ -51,6 +70,7 @@ services:
       dockerfile: .docker-pyannote-server/Dockerfile
     pull_policy: never
     restart: unless-stopped
+    profiles: ["cuda", "cuda2x"]
     ports:
       - 8010:8000
     volumes:
@@ -72,6 +92,8 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ================================ Pyannote-CPU ================================
+
   pyannote-server-cpu:
     image: local/pyannote-server:latest-cpu
     build:
@@ -81,14 +103,14 @@ services:
         - TORCH_CPU=1
     pull_policy: never
     restart: unless-stopped
+    profiles: ["cpu"]
     ports:
       - 8010:8000
     volumes:
       - hugging_face_cache:/root/.cache/huggingface
     environment:
-      #- GPU_PARALLEL_COUNTS=2
       - CPU_DEVICES=1
-      #- CPU_PARALLEL_COUNTS=1
+      - CPU_PARALLEL_COUNTS=1
       - AUDIO_SEMAPHORE=1
       - DIARIZATION_SEMAPHORE=1
 
