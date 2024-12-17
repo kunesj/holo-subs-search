@@ -38,6 +38,40 @@ class ChannelRecord(HolodexMixin, FlagsMixin, Record):
             return f"https://holodex.net/channel/{self.holodex_id}"
         return None
 
+    @property
+    def youtube_ids(self) -> frozenset[str]:
+        result = set()
+
+        if self.youtube_id:
+            result.add(self.youtube_id)
+
+        if self.youtube_info and (_value := self.youtube_info.get("id")):
+            result.add(_value)
+
+        if self.holodex_info:
+            if _value := self.holodex_info.get("id"):
+                result.add(_value)  # most probably youtube ID
+            if _value := self.holodex_info.get("yt_uploads_id"):
+                result.add(_value)
+            if _value := self.holodex_info.get("extra_ids"):
+                result |= set(_value)  # usually topic channels etc.
+
+        return frozenset(result)
+
+    @property
+    def twitch_ids(self) -> frozenset[str]:
+        result = set()
+        if self.holodex_info and (_value := self.holodex_info.get("twitch")):
+            result.add(_value)
+        return frozenset(result)
+
+    @property
+    def twitter_ids(self) -> frozenset[str]:
+        result = set()
+        if self.holodex_info and (_value := self.holodex_info.get("twitter")):
+            result.add(_value)
+        return frozenset(result)
+
     # Methods
 
     @classmethod

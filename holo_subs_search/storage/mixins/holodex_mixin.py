@@ -49,7 +49,7 @@ class HolodexMixin(YoutubeMixin, abc.ABC):
         if self.youtube_info:
             return self.youtube_info.get("id")
         elif self.holodex_info:
-            return self.holodex_info.get("id")
+            return self.holodex_info.get("id")  # most probably youtube ID
         return None
 
     # Methods
