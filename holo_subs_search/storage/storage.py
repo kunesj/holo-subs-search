@@ -6,7 +6,7 @@ import pathlib
 import weakref
 from typing import Any, Callable, Iterator, Literal, TypeVar
 
-from .. import __version__
+from .. import __storage_version__
 from . import migrations
 from .channel import ChannelRecord
 from .mixins.metadata_mixin import MetadataMixin
@@ -47,7 +47,7 @@ class Storage(MetadataMixin):
 
     @classmethod
     def build_metadata(cls, git_privacy: GitPrivacyType = "private", **kwargs) -> dict[str, Any]:
-        return super().build_metadata(**kwargs) | {"version": __version__, "git_privacy": git_privacy}
+        return super().build_metadata(**kwargs) | {"version": __storage_version__, "git_privacy": git_privacy}
 
     def migrate(self) -> None:
         visited = set()
@@ -67,8 +67,10 @@ class Storage(MetadataMixin):
             if version == self.metadata["version"]:
                 break
 
-        if self.metadata["version"] != __version__:
-            raise ValueError("Storage was not migrated to current version!", self.metadata["version"], __version__)
+        if self.metadata["version"] != __storage_version__:
+            raise ValueError(
+                "Storage was not migrated to current version!", self.metadata["version"], __storage_version__
+            )
 
     # Generic Records
 
