@@ -8,11 +8,10 @@ import pathlib
 import tempfile
 from typing import TYPE_CHECKING
 
-# noinspection PyPackageRequirements
-import ffmpeg  # ffmpeg-python
 import openai
 import openai.types.audio
 
+from .. import ffmpeg_tools
 from ..env_config import (
     VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
     WHISPER_API_KEYS,
@@ -140,15 +139,7 @@ async def transcribe_diarized_audio(
 
             # create audio chunk
 
-            chunk_path = pathlib.Path(tmpdir) / f"chunk-{idx}.wav"
-
-            stream = ffmpeg.input(
-                str(file_path), ss=chunk.start, to=chunk.end, accurate_seek=None, hide_banner=None, loglevel="error"
-            )
-            stream = ffmpeg.output(stream, str(chunk_path), format="wav")
-            await asyncio.to_thread(lambda: ffmpeg.run(stream))
-
-            audio_chunk = io.BytesIO(chunk_path.read_bytes())
+            audio_chunk = await ffmpeg_tools.read_chunk(file_path, chunk.start, chunk.end, format="wav")
 
             # transcribe the chunk
 
