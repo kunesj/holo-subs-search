@@ -9,6 +9,7 @@ import logging
 import os
 import pathlib
 import shutil
+import sys
 from typing import Callable
 
 import termcolor
@@ -198,24 +199,26 @@ async def main() -> None:
         help="`--video-filter id:eq:***** flags:excludes:****` Can be used to limit what videos are processed",
     )
     # endregion
-    # ---- fetching metadata ----
+    # ---- Holodex ----
+    # region
     parser.add_argument(
-        "--fetch-org-channels",
+        "--holodex-fetch-org-channels",
         default=None,  # "All Vtubers", "Hololive", "Nijisanji", "Independents"
     )
     parser.add_argument(
-        "--refresh-channels",
+        "--holodex-refresh-channels",
         action="store_true",
     )
     parser.add_argument(
-        "--refresh-videos",
+        "--holodex-refresh-videos",
         action="store_true",
     )
     parser.add_argument(
-        "--update-stored",
+        "--holodex-update-info",
         action="store_true",
-        help="If already stored Holodex/Youtube/... info should be updated",
+        help="If already stored Holodex info should be updated",
     )
+    # endregion
     # ---- YouTube ----
     # region
     parser.add_argument(
@@ -382,21 +385,21 @@ async def main() -> None:
 
     fetch_holodex_ids = set()
 
-    if args.refresh_channels:
+    if args.holodex_refresh_channels:
         for channel in storage.list_channels(channel_filter):
-            if channel.holodex_id and Flags.HOLODEX_PRESERVE not in channel.flags and args.update_stored:
+            if channel.holodex_id and Flags.HOLODEX_PRESERVE not in channel.flags and args.holodex_update_info:
                 fetch_holodex_ids.add(channel.holodex_id)
 
-    if args.fetch_org_channels:
-        _logger.info("Fetching %r channels...", args.fetch_org_channels)
-        async for value in holodex_tools.download_org_channels(org=args.fetch_org_channels):
-            ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
+    if args.holodex_fetch_org_channels:
+        _logger.info("Fetching %r channels...", args.holodex_fetch_org_channels)
+        async for value in holodex_tools.download_org_channels(org=args.holodex_fetch_org_channels):
+            ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.holodex_update_info)
             fetch_holodex_ids -= {value.id}
 
     if fetch_holodex_ids:
         _logger.info("Refreshing stored channels...")
         async for value in holodex_tools.download_channels(channel_ids=set(fetch_holodex_ids)):
-            ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
+            ChannelRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.holodex_update_info)
             fetch_holodex_ids -= {value.id}
 
     if fetch_holodex_ids:
@@ -404,7 +407,7 @@ async def main() -> None:
 
     # refreshing/fetching video info
 
-    if args.refresh_videos:
+    if args.holodex_refresh_videos:
         _logger.info("Refreshing videos...")
 
         holodex_channel_ids = {
@@ -415,7 +418,7 @@ async def main() -> None:
         async for value in holodex_tools.download_channel_video_info(holodex_channel_ids):
             if value.status in ("new", "upcoming", "live"):
                 continue
-            video = VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.update_stored)
+            video = VideoRecord.from_holodex(storage=storage, value=value, update_holodex_info=args.holodex_update_info)
             video.update_gitignore()
 
     # process video
@@ -439,4 +442,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        _logger.info("Stopped by user")
+        sys.exit(1)

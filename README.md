@@ -26,7 +26,7 @@ See [env_config.py](./holo_subs_search/env_config.py) for configurable ENV varia
 - Fetch list of all Hololive channels
 
     ```bash
-    python3.11 -m holo_subs_search --fetch-org-channels Hololive
+    python3.11 -m holo_subs_search --holodex-fetch-org-channels Hololive
     ```
 
 
@@ -36,7 +36,7 @@ See [env_config.py](./holo_subs_search/env_config.py) for configurable ENV varia
 - Fetch list of all videos for the channels you did not delete and collabs on other channels.
 
     ```bash
-    python3.11 -m holo_subs_search --refresh-videos
+    python3.11 -m holo_subs_search --holodex-refresh-videos
     ```
 
 
@@ -140,7 +140,7 @@ Here is command that:
 
 ```bash
 python3.11 -m holo_subs_search 
---refresh-videos
+--holodex-refresh-videos
 --video-filter subtitle_sources:excludes:whisper
 
 --youtube-memberships UCHsx4Hqa-1ORjQTh9TYDhww
