@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import logging
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 from types import TracebackType
@@ -254,3 +256,38 @@ async def download_video(
                     continue
                 video_id, name = entry.name.split(".", maxsplit=1)
                 yield name, entry.path
+
+
+async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v", "--video-id", required=True, help="`-v N0aRdTGrLZo` ID od youtube video to download")
+    parser.add_argument("--save", help="Path where should the files be saved")
+    parser.add_argument(
+        "-d",
+        "--debug",
+        type=int,
+        choices=[50, 40, 30, 20, 10, 1],
+        default=20,
+        help="Set global debug level [CRITICAL=50, ERROR=40, WARNING=30, INFO=20, DEBUG=10, SPAM=1]",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig()
+    logger = logging.getLogger()
+    logger.setLevel(args.debug)
+
+    if args.save:
+        save_path = pathlib.Path(args.save)
+        if not save_path.is_dir() or not save_path.exists():
+            raise ValueError("Save path must be existing directory")
+    else:
+        save_path = None
+
+    async for item_name, item_path in download_video(video_id=args.video_id):
+        _logger.info("Downloaded: %r", (item_name, item_path))
+        if save_path:
+            shutil.copy(item_path, save_path / os.path.basename(item_path))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -5,7 +5,9 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
 import pathlib
+import shutil
 import tempfile
 import time
 from typing import AsyncIterator, Literal, Self
@@ -199,6 +201,7 @@ async def download_video(
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--video-id", required=True, help="`-v wQxKp6trj5g` ID od youtube video to download")
+    parser.add_argument("--save", help="Path where should the files be saved")
     parser.add_argument(
         "-d",
         "--debug",
@@ -213,8 +216,17 @@ async def main():
     logger = logging.getLogger()
     logger.setLevel(args.debug)
 
-    async for ragtag_file in download_video(video_id=args.video_id):
-        _logger.info("Downloaded: %r", ragtag_file)
+    if args.save:
+        save_path = pathlib.Path(args.save)
+        if not save_path.is_dir() or not save_path.exists():
+            raise ValueError("Save path must be existing directory")
+    else:
+        save_path = None
+
+    async for item in download_video(video_id=args.video_id):
+        _logger.info("Downloaded: %r", item)
+        if save_path:
+            shutil.copy(item.path, save_path / os.path.basename(item.path))
 
 
 if __name__ == "__main__":
