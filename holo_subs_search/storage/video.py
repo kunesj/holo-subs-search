@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 import yt_dlp
 from holodex.model.channel_video import ChannelVideoInfo as HolodexChannelVideoInfo
 
-from .. import diarization, ffmpeg_tools, ragtag_tools, transcription, ydl_tools
+from .. import diarization, ffmpeg_tools, ragtag_tools, rubyruby_tools, transcription, ydl_tools
 from ..env_config import (
     VIDEO_FETCH_RAGTAG_PARALLEL_COUNT,
+    VIDEO_FETCH_RUBYRUBY_PARALLEL_COUNT,
     VIDEO_FETCH_YOUTUBE_PARALLEL_COUNT,
     VIDEO_PYANNOTE_DIARIZE_PARALLEL_COUNT,
     VIDEO_WHISPER_TRANSCRIBE_PARALLEL_COUNT,
@@ -29,6 +30,7 @@ from .mixins.filterable_mixin import FilterPart
 from .mixins.flags_mixin import Flags, FlagsMixin
 from .mixins.holodex_mixin import HolodexMixin
 from .mixins.ragtag_mixin import RagtagMixin
+from .mixins.rubyruby_mixin import RubyRubyMixin
 from .record import Record
 
 if TYPE_CHECKING:
@@ -39,7 +41,7 @@ SubtitlesState = Literal["missing", "garbage"]
 _logger = logging.getLogger(__name__)
 
 
-class VideoRecord(ContentMixin, RagtagMixin, HolodexMixin, FlagsMixin, Record):
+class VideoRecord(ContentMixin, RagtagMixin, RubyRubyMixin, HolodexMixin, FlagsMixin, Record):
     RAGTAG_JSON: ClassVar[str] = "ragtag.json"
     model_name = "video"
 
@@ -470,6 +472,100 @@ class VideoRecord(ContentMixin, RagtagMixin, HolodexMixin, FlagsMixin, Record):
         except ragtag_tools.RagtagNotFound as e:
             _logger.info("Video not available in archive.ragtag.moe: %s", self.id)
             self.flags |= {*self.flags, Flags.RAGTAG_UNAVAILABLE}
+
+    # endregion
+    # ==================================== streams.rubyruby.net ====================================
+    # region
+
+    async def fetch_rubyruby(self, *, download_audio: bool = False, force: bool = False) -> None:
+        _logger.debug("Fetching RubyRuby audio for video %s - %s", self.id, self.published_at)
+
+        async with asyncio.TaskGroup() as tg:
+            coro = self._fetch_rubyruby_single(
+                download_audio=download_audio,
+                force=force,
+            )
+            tg.create_task(coro)
+
+    @with_semaphore(VIDEO_FETCH_RUBYRUBY_PARALLEL_COUNT)
+    @logging_with_values(get_context=lambda self, *args, **kwargs: [f"video={self.id}", "fetch-rubyruby"])
+    async def _fetch_rubyruby_single(self, *, download_audio: bool = False, force: bool = False) -> None:
+        # check if video can be processed
+
+        if not self.youtube_id:
+            return
+
+        if not (self.flags & {Flags.YOUTUBE_PRIVATE, Flags.YOUTUBE_UNAVAILABLE}):
+            # video available on YouTube, don't put any unnecessary traffic on archive
+            return
+
+        if Flags.RUBYRUBY_UNAVAILABLE in self.flags and not force:
+            return
+
+        # calculate if audio should be downloaded
+        # - we don't care about the source. if any audio is downloaded, skip this.
+
+        if download_audio and not force:
+            download_audio = not bool(list(self.list_content(AudioItem.build_filter())))
+
+        # fetch content
+
+        if not download_audio:
+            return
+
+        _logger.info(
+            "Fetching RubyRuby video: video_id=%r, published_at=%r, download_audio=%r",
+            self.id,
+            self.published_at,
+            download_audio,
+        )
+
+        try:
+            async for rubyruby_file in rubyruby_tools.download_video(
+                video_id=self.youtube_id, members=Flags.YOUTUBE_MEMBERSHIP in self.flags, download_audio=download_audio
+            ):
+                match rubyruby_file.file_type:
+                    case "rubyruby":
+                        self.rubyruby_info = json.loads(rubyruby_file.path.read_text())
+
+                    case "info":
+                        if self.youtube_info:
+                            _logger.info("Keeping original YT info.json: %s", self.id)
+                        else:
+                            self.youtube_info = json.loads(rubyruby_file.path.read_text())
+
+                    case "audio-only" | "video":
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            if rubyruby_file.file_name.count(".") >= 2:
+                                base_name = rubyruby_file.file_name.split(".", maxsplit=1)[-1]
+                                base_name = f"{self.youtube_id}.{base_name}"
+                            else:
+                                base_name = rubyruby_file.file_name
+
+                            if rubyruby_file.file_type == "video":
+                                audio_name = ".".join(["audio-only", *base_name.split(".")[:-1], "webm"])
+                                audio_path = pathlib.Path(tmpdir) / audio_name
+                                await ffmpeg_tools.extract_audio(rubyruby_file.path, audio_path)
+                            else:
+                                audio_name = base_name
+                                audio_path = rubyruby_file.path
+
+                            content = audio_path.read_bytes()
+                            metadata = AudioItem.build_metadata(source="rubyruby", audio_file=audio_name)
+
+                            checksum = AudioItem.build_checksum(metadata, content)
+                            content_id = AudioItem.build_content_id("rubyruby", checksum, audio_name)
+                            item = AudioItem(path=self.content_path / content_id)
+
+                            item.create(metadata)
+                            item.audio_path.write_bytes(content)
+
+                    case _:
+                        _logger.warning("Fetched unexpected file: %s", rubyruby_file)
+
+        except rubyruby_tools.RubyRubyNotFound as e:
+            _logger.info("Video not available in streams.rubyruby.net: %s", self.id)
+            self.flags |= {*self.flags, Flags.RUBYRUBY_UNAVAILABLE}
 
     # endregion
     # ==================================== Pyannote ====================================

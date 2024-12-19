@@ -31,6 +31,8 @@ class Flags:
 
     # content is not available in ragtag.moe archive
     RAGTAG_UNAVAILABLE = "ragtag-unavailable"
+    # content is not available in ragtag.moe archive
+    RUBYRUBY_UNAVAILABLE = "rubyruby-unavailable"
 
     # flags of SubtitleItem objects
     SUBTITLE_TRANSCRIPTION = "transcription"

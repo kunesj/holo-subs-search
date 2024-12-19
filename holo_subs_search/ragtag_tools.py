@@ -72,6 +72,7 @@ class RagtagFile:
 
             elif file_name in (f"{video_id}.webm", f"{video_id}.mp4", f"{video_id}.mkv"):
                 file_type = "video"
+                # add format_id to filename if it's missing
                 if format_id not in file_name:
                     saved_name_parts = file_name.split(".")
                     saved_name_parts[-1:-1] = [format_id]

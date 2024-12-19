@@ -123,6 +123,13 @@ async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
         )
         video.update_gitignore()
 
+    if args.rubyruby_fetch_audio and video.youtube_id:
+        await video.fetch_rubyruby(
+            download_audio=args.rubyruby_fetch_audio,
+            force=args.rubyruby_force,
+        )
+        video.update_gitignore()
+
     # diarize audio with pyannote
 
     if args.pyannote_diarize_audio:
@@ -274,6 +281,25 @@ async def main() -> None:
     )
     parser.add_argument(
         "--ragtag-force",
+        action="store_true",
+        help="Don't skip already processed or unavailable items",
+    )
+    # endregion
+    # ---- RubyRuby Archive (streams.rubyruby.net) ----
+    # region
+    parser.add_argument(
+        "--rubyruby-fetch-audio",
+        action="store_true",
+        help="Will try to fetch unavailable videos from RubyRuby Archive. "
+        "Videos without `youtube-unavailable` or `youtube-private` flags are automatically skipped.",
+    )
+    parser.add_argument(
+        "--rubyruby-clear-audio",
+        action="store_true",
+        help="Delete downloaded rubyruby audio",
+    )
+    parser.add_argument(
+        "--rubyruby-force",
         action="store_true",
         help="Don't skip already processed or unavailable items",
     )
