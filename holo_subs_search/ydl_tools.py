@@ -260,7 +260,7 @@ async def download_video(
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", "--video-id", required=True, help="`-v N0aRdTGrLZo` ID od youtube video to download")
+    parser.add_argument("-v", "--video-id", required=True, help="`-v g7IP2ZBVbPU` ID od youtube video to download")
     parser.add_argument("--save", help="Path where should the files be saved")
     parser.add_argument(
         "-d",

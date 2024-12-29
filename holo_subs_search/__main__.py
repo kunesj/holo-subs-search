@@ -163,6 +163,13 @@ async def _process_video(args: argparse.Namespace, video: VideoRecord) -> None:
             _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
             shutil.rmtree(audio_item.path)
 
+    if args.rubyruby_clear_audio:
+        for audio_item in video.list_content(
+            AudioItem.build_filter(FilterPart(name="source", operator="eq", value="rubyruby"))
+        ):
+            _logger.info("Clearing audio item %r of video %r", audio_item.content_id, video.id)
+            shutil.rmtree(audio_item.path)
+
 
 # flake8: noqa: C801
 async def main() -> None:

@@ -31,6 +31,10 @@ class ContentMixin(FilesMixin, abc.ABC):
     def subtitle_sources(self) -> frozenset[str]:
         return frozenset(x.source for x in self.list_content(SubtitleItem.build_filter()))
 
+    @property
+    def subtitle_langs(self) -> frozenset[str]:
+        return frozenset(x.lang for x in self.list_content(SubtitleItem.build_filter()))
+
     # Methods
 
     def list_content(self, item_filter: Callable[[ContentItemType], bool] | None = None) -> Iterator[ContentItemType]:
